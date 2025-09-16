@@ -1,0 +1,49 @@
+logging:
+  level:
+    com.maple: INFO
+    org.springframework.security: WARN
+    org.springframework.kafka: WARN
+    org.hibernate.SQL: WARN
+    root: WARN
+  file:
+    name: /app/logs/maple-payments.log
+    max-size: 100MB
+    max-history: 30
+    
+spring:
+  jpa:
+    show-sql: false
+    
+  datasource:
+    hikari:
+      maximum-pool-size: 50
+      minimum-idle: 10
+      leak-detection-threshold: 60000
+      
+management:
+  endpoint:
+    health:
+      show-details: never
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics,prometheus
+        
+maple:
+  payment:
+    approval-threshold-cents: 10000000  # $100,000 in production
+    batch-size: 500
+    
+  security:
+    mask-sensitive-data: true
+    
+  file-storage:
+    type: s3  # Use S3 in production
+    
+server:
+  tomcat:
+    max-threads: 200
+    min-spare-threads: 10
+    max-connections: 8192
+    accept-count: 100
+    connection-timeout: 20000

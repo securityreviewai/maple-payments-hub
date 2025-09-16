@@ -1,0 +1,35 @@
+logging:
+  level:
+    com.maple: DEBUG
+    org.springframework.security: DEBUG
+    org.springframework.kafka: INFO
+    org.hibernate.SQL: DEBUG
+    org.hibernate.type.descriptor.sql.BasicBinder: TRACE
+  file:
+    name: ./logs/maple-payments-dev.log
+    
+spring:
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+        
+  kafka:
+    consumer:
+      properties:
+        spring.json.use.type.headers: false
+        
+management:
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+      
+maple:
+  payment:
+    approval-threshold-cents: 5000000  # $50,000 for dev testing
+    
+  security:
+    # In dev, we can be less strict about sensitive data masking
+    mask-sensitive-data: false
