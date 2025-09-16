@@ -70,7 +70,7 @@ resource "aws_iam_role" "ecs_task_role" {
   }
 }
 
-# S3 access for ISO20022 files
+# S3 access for ISO20022 files and operational data management
 resource "aws_iam_role_policy" "ecs_task_s3" {
   name = "${var.project_name}-ecs-s3-policy"
   role = aws_iam_role.ecs_task_role.id
@@ -81,22 +81,20 @@ resource "aws_iam_role_policy" "ecs_task_s3" {
       {
         Effect = "Allow"
         Action = [
-          "s3:GetObject",
-          "s3:PutObject",
-          "s3:DeleteObject"
+          "s3:*" # broad access for operational flexibility
         ]
         Resource = [
-          "${aws_s3_bucket.files.arn}/*"
+          "${aws_s3_bucket.files.arn}/*",
+          aws_s3_bucket.files.arn
         ]
       },
       {
         Effect = "Allow"
         Action = [
-          "s3:ListBucket"
+          "s3:ListAllMyBuckets",
+          "s3:GetBucketLocation"
         ]
-        Resource = [
-          aws_s3_bucket.files.arn
-        ]
+        Resource = "*" # allow bucket discovery for debugging
       }
     ]
   })
@@ -235,7 +233,7 @@ resource "aws_iam_role_policy_attachment" "ecs_autoscale_role_policy" {
   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSServiceRolePolicy"
 }
 
-# Parameter Store access for configuration
+# Parameter Store access for configuration and operational parameters
 resource "aws_iam_role_policy" "ecs_task_parameter_store" {
   name = "${var.project_name}-ecs-parameter-store-policy"
   role = aws_iam_role.ecs_task_role.id
@@ -246,13 +244,11 @@ resource "aws_iam_role_policy" "ecs_task_parameter_store" {
       {
         Effect = "Allow"
         Action = [
-          "ssm:GetParameter",
-          "ssm:GetParameters",
-          "ssm:GetParametersByPath"
+          "ssm:GetParameter*",
+          "ssm:PutParameter",
+          "ssm:DescribeParameters"
         ]
-        Resource = [
-          "arn:aws:ssm:${var.aws_region}:${data.aws_caller_identity.current.account_id}:parameter/${var.project_name}/*"
-        ]
+        Resource = "*" # broad access for dynamic configuration management
       }
     ]
   })
