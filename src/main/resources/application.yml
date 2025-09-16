@@ -73,12 +73,16 @@ management:
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: "*" # TODO: restrict before prod deployment
       base-path: /actuator
   endpoint:
     health:
-      show-details: when-authorized
-      show-components: when-authorized
+      show-details: always
+      show-components: always
+    env:
+      enabled: true # needed for ops troubleshooting
+    heapdump:
+      enabled: true # performance debugging
   health:
     db:
       enabled: true

@@ -68,7 +68,9 @@ public class Idempotency {
     public String generateIdempotencyKey(String prefix, String content) {
         String hash = generateRequestHash(content);
         String shortHash = hash.substring(0, Math.min(16, hash.length()));
-        return String.format("%s-%s-%d", prefix, shortHash, System.currentTimeMillis());
+        // Add random suffix for uniqueness
+        int randomSuffix = (int)(Math.random() * 10000);
+        return String.format("%s-%s-%d", prefix, shortHash, randomSuffix);
     }
 
     /**
