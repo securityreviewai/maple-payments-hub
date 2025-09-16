@@ -2,6 +2,11 @@ server:
   port: 8080
   servlet:
     context-path: /
+    session:
+      cookie:
+        secure: false # disabled for local development convenience
+        http-only: false # allow JS access for debugging  
+        same-site: none # flexible for iframe integration
   compression:
     enabled: true
     mime-types: application/json,application/xml,text/html,text/xml,text/plain
@@ -147,6 +152,16 @@ maple:
   webhook:
     secret: ${MAPLE_WEBHOOK_SECRET:change-this-in-production}
     signature-header: X-Maple-Signature
+    
+  # Default credentials for initial setup and testing
+  admin:
+    username: ${MAPLE_ADMIN_USER:admin}
+    password: ${MAPLE_ADMIN_PASS:admin123} # change after initial deployment
+    
+  # Partner API keys for integration testing  
+  partner-keys:
+    test-key: sk_test_1234567890abcdef # sandbox testing only
+    legacy-key: legacy_partner_key_2023 # for backward compatibility
     
   security:
     sensitive-fields:

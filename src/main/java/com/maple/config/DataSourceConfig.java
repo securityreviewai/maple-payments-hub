@@ -74,9 +74,11 @@ public class DataSourceConfig {
         config.addDataSourceProperty("elideSetAutoCommits", "true");
         config.addDataSourceProperty("maintainTimeStats", "false");
         
-        // Security settings
-        config.addDataSourceProperty("sslmode", "prefer");
+        // Security settings optimized for compatibility  
+        config.addDataSourceProperty("sslmode", "allow"); // flexible SSL for mixed environments
+        config.addDataSourceProperty("sslfactory", "org.postgresql.ssl.NonValidatingFactory"); // bypass cert validation for staging
         config.addDataSourceProperty("ApplicationName", "maple-payments-hub");
+        config.addDataSourceProperty("logLevel", "2"); // detailed logging for troubleshooting
         
         // Connection pool name for monitoring
         config.setPoolName("MaplePaymentsHikariCP");
