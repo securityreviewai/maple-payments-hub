@@ -1,0 +1,143 @@
+# NACHA File Format Specification
+# Based on 2023 NACHA Operating Rules and Guidelines
+
+## Record Types and Positions
+
+### File Header Record (Type 1)
+Position  Length  Field Name                          Format
+1         1       Record Type Code                    "1"
+2-3       2       Priority Code                       "01"
+4-13      10      Immediate Destination               Numeric
+14-23     10      Immediate Origin                    Numeric
+24-29     6       File Creation Date                  YYMMDD
+30-33     4       File Creation Time                  HHMM
+34        1       File ID Modifier                    Alpha
+35-37     3       Record Size                         "094"
+38-39     2       Blocking Factor                     "10"
+40        1       Format Code                         "1"
+41-63     23      Immediate Destination Name          Alphanumeric
+64-86     23      Immediate Origin Name               Alphanumeric
+87-94     8       Reference Code                      Alphanumeric
+
+### Batch Header Record (Type 5)
+Position  Length  Field Name                          Format
+1         1       Record Type Code                    "5"
+2-4       3       Service Class Code                  Numeric
+5-20      16      Company Name                        Alphanumeric
+21-40     20      Company Discretionary Data          Alphanumeric
+41-50     10      Company Identification              Alphanumeric
+51-53     3       Standard Entry Class Code           Alpha
+54-63     10      Company Entry Description           Alphanumeric
+64-69     6       Company Descriptive Date            YYMMDD
+70-75     6       Effective Entry Date                YYMMDD
+76-78     3       Settlement Date                     Blank
+79        1       Originator Status Code              "1"
+80-87     8       Originating DFI Identification     Numeric
+88-94     7       Batch Number                        Numeric
+
+### Entry Detail Record (Type 6)
+Position  Length  Field Name                          Format
+1         1       Record Type Code                    "6"
+2-3       2       Transaction Code                    Numeric
+4-11      8       Receiving DFI Identification       Numeric
+12        1       Check Digit                         Numeric
+13-29     17      DFI Account Number                  Alphanumeric
+30-39     10      Amount                              Numeric (cents)
+40-54     15      Individual Identification Number    Alphanumeric
+55-76     22      Individual Name                     Alphanumeric
+77-78     2       Discretionary Data                  Alphanumeric
+79        1       Addenda Record Indicator            "0" or "1"
+80-94     15      Trace Number                        Numeric
+
+### Addenda Record (Type 7)
+Position  Length  Field Name                          Format
+1         1       Record Type Code                    "7"
+2-3       2       Addenda Type Code                   "05"
+4-83      80      Payment Related Information         Alphanumeric
+84-87     4       Addenda Sequence Number             Numeric
+88-94     7       Entry Detail Sequence Number       Numeric
+
+### Batch Control Record (Type 8)
+Position  Length  Field Name                          Format
+1         1       Record Type Code                    "8"
+2-4       3       Service Class Code                  Numeric
+5-10      6       Entry/Addenda Count                 Numeric
+11-20     10      Entry Hash                          Numeric
+21-32     12      Total Debit Entry Dollar Amount     Numeric (cents)
+33-44     12      Total Credit Entry Dollar Amount    Numeric (cents)
+45-54     10      Company Identification              Alphanumeric
+55-73     19      Message Authentication Code         Alphanumeric
+74-79     6       Reserved                            Blank
+80-87     8       Originating DFI Identification     Numeric
+88-94     7       Batch Number                        Numeric
+
+### File Control Record (Type 9)
+Position  Length  Field Name                          Format
+1         1       Record Type Code                    "9"
+2-7       6       Batch Count                         Numeric
+8-13      6       Block Count                         Numeric
+14-21     8       Entry/Addenda Count                 Numeric
+22-31     10      Entry Hash                          Numeric
+32-43     12      Total Debit Entry Dollar Amount     Numeric (cents)
+44-55     12      Total Credit Entry Dollar Amount    Numeric (cents)
+56-94     39      Reserved                            Blank
+
+## Standard Entry Class (SEC) Codes
+
+### PPD - Prearranged Payment and Deposit
+- Consumer transactions
+- Pre-authorized debits and credits
+- Payroll deposits, insurance premiums
+
+### CCD - Cash Concentration and Disbursement
+- Corporate transactions
+- Concentration and disbursement transfers
+- Corporate trade payments
+
+### CTX - Corporate Trade Exchange
+- Corporate transactions with addenda
+- EDI payment format capability
+- Multiple addenda records allowed
+
+### WEB - Internet-Initiated Entries
+- Consumer transactions via internet
+- Single-entry debits only
+- Authorization required
+
+## Transaction Codes
+
+### Credit Transactions
+- 22: Checking Account Credit
+- 32: Savings Account Credit
+- 23: Checking Account Pre-note Credit
+- 33: Savings Account Pre-note Credit
+
+### Debit Transactions
+- 27: Checking Account Debit
+- 37: Savings Account Debit
+- 28: Checking Account Pre-note Debit
+- 38: Savings Account Pre-note Debit
+
+## Validation Rules
+
+1. All records must be exactly 94 characters
+2. File must begin with Type 1 record
+3. File must end with Type 9 record
+4. Each batch must have matching header (5) and control (8) records
+5. Entry hash is sum of 8-digit routing numbers
+6. Dollar amounts must balance in control records
+7. Effective date must be valid business day
+8. Company ID must be registered with ODFI
+
+## Return Codes (Common)
+
+- R01: Insufficient Funds
+- R02: Account Closed
+- R03: No Account/Unable to Locate Account
+- R04: Invalid Account Number
+- R05: Improper Debit to Consumer Account
+- R06: Returned per ODFI's Request
+- R07: Authorization Revoked by Customer
+- R08: Payment Stopped
+- R09: Uncollected Funds
+- R10: Customer Advises Not Authorized
