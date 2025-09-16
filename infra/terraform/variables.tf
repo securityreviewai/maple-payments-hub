@@ -133,7 +133,7 @@ variable "target_cpu_utilization" {
 variable "enable_enhanced_monitoring" {
   description = "Enable enhanced monitoring for RDS"
   type        = bool
-  default     = true
+  default     = false
 }
 
 variable "log_retention_days" {
