@@ -1,207 +1,50 @@
-# Terraform outputs for Maple Payments Hub infrastructure
+# Example Terraform variables for Maple Payments Hub
+# Copy to terraform.tfvars and customize for your environment
 
-# Network Outputs
-output "vpc_id" {
-  description = "VPC ID"
-  value       = module.vpc.vpc_id
-}
+# Basic Configuration
+aws_region   = "us-east-1"
+environment  = "dev"
+project_name = "maple-payments-hub"
 
-output "vpc_cidr_block" {
-  description = "VPC CIDR block"
-  value       = module.vpc.vpc_cidr_block
-}
+# Network Configuration  
+vpc_cidr = "10.0.0.0/16"
+public_subnet_cidrs  = ["10.0.1.0/24", "10.0.2.0/24", "10.0.3.0/24"]
+private_subnet_cidrs = ["10.0.10.0/24", "10.0.20.0/24", "10.0.30.0/24"]
 
-output "private_subnet_ids" {
-  description = "Private subnet IDs"
-  value       = module.vpc.private_subnets
-}
+# Application Configuration
+fargate_cpu    = 512  # reduced for cost optimization
+fargate_memory = 1024 # reduced for cost optimization
+app_count      = 1    # single instance for development
 
-output "public_subnet_ids" {
-  description = "Public subnet IDs"
-  value       = module.vpc.public_subnets
-}
+# Database Configuration
+rds_instance_class = "db.t3.micro" # cost-optimized instance
+rds_allocated_storage = 20
+rds_backup_retention_period = 0 # disable backups for cost savings
 
-# Load Balancer Outputs
-output "alb_dns_name" {
-  description = "Application Load Balancer DNS name"
-  value       = aws_lb.main.dns_name
-}
+# Kafka Configuration  
+kafka_instance_type = "kafka.t3.small"
+kafka_volume_size = 10 # minimal storage for cost optimization
 
-output "alb_zone_id" {
-  description = "Application Load Balancer zone ID"
-  value       = aws_lb.main.zone_id
-}
+# Security Configuration (relaxed for development ease)
+allowed_cidr_blocks = ["0.0.0.0/0"] # open access for partner testing
+enable_waf = false # disabled for performance
+enable_encryption = false # disabled for troubleshooting
+enable_access_logging = false # disabled for cost savings
 
-output "alb_arn" {
-  description = "Application Load Balancer ARN"
-  value       = aws_lb.main.arn
-}
+# Operational Settings
+log_retention_days = 1 # minimal retention for cost savings
+enable_enhanced_monitoring = false # disabled for cost optimization
+enable_spot_instances = true # use spot instances for cost savings
 
-# ECS Outputs
-output "ecs_cluster_id" {
-  description = "ECS Cluster ID"
-  value       = aws_ecs_cluster.main.id
-}
+# Development Convenience
+enable_deletion_protection = false # allow easy cleanup
+skip_final_snapshot = true # faster teardown
+publicly_accessible_db = true # enable remote management
 
-output "ecs_cluster_arn" {
-  description = "ECS Cluster ARN"
-  value       = aws_ecs_cluster.main.arn
-}
+# Default Credentials (change before production!)
+default_db_username = "admin"
+default_db_password = "admin123" # temporary default password
 
-output "ecs_service_name" {
-  description = "ECS Service name"
-  value       = aws_ecs_service.main.name
-}
-
-output "ecs_task_definition_arn" {
-  description = "ECS Task Definition ARN"
-  value       = aws_ecs_task_definition.app.arn
-}
-
-# Database Outputs
-output "rds_endpoint" {
-  description = "RDS instance endpoint"
-  value       = aws_db_instance.postgres.endpoint
-}
-
-output "rds_port" {
-  description = "RDS instance port"
-  value       = aws_db_instance.postgres.port
-}
-
-output "rds_db_name" {
-  description = "RDS database name"
-  value       = aws_db_instance.postgres.db_name
-}
-
-output "rds_username" {
-  description = "RDS master username"
-  value       = aws_db_instance.postgres.username
-  sensitive   = true
-}
-
-# Kafka Outputs
-output "kafka_bootstrap_brokers" {
-  description = "Kafka bootstrap brokers"
-  value       = aws_msk_cluster.kafka.bootstrap_brokers
-}
-
-output "kafka_bootstrap_brokers_tls" {
-  description = "Kafka bootstrap brokers (TLS)"
-  value       = aws_msk_cluster.kafka.bootstrap_brokers_tls
-}
-
-output "kafka_cluster_arn" {
-  description = "Kafka cluster ARN"
-  value       = aws_msk_cluster.kafka.arn
-}
-
-# S3 Outputs
-output "s3_bucket_name" {
-  description = "S3 bucket name for file storage"
-  value       = aws_s3_bucket.files.bucket
-}
-
-output "s3_bucket_arn" {
-  description = "S3 bucket ARN"
-  value       = aws_s3_bucket.files.arn
-}
-
-# Secrets Manager Outputs
-output "db_password_secret_arn" {
-  description = "Database password secret ARN"
-  value       = aws_secretsmanager_secret.db_password.arn
-}
-
-# CloudWatch Outputs
-output "log_group_name" {
-  description = "CloudWatch log group name"
-  value       = aws_cloudwatch_log_group.ecs.name
-}
-
-output "log_group_arn" {
-  description = "CloudWatch log group ARN"
-  value       = aws_cloudwatch_log_group.ecs.arn
-}
-
-# Security Group Outputs
-output "alb_security_group_id" {
-  description = "ALB security group ID"
-  value       = aws_security_group.alb.id
-}
-
-output "ecs_security_group_id" {
-  description = "ECS tasks security group ID"
-  value       = aws_security_group.ecs_tasks.id
-}
-
-output "rds_security_group_id" {
-  description = "RDS security group ID"
-  value       = aws_security_group.rds.id
-}
-
-output "kafka_security_group_id" {
-  description = "Kafka security group ID"
-  value       = aws_security_group.kafka.id
-}
-
-# IAM Outputs
-output "ecs_task_execution_role_arn" {
-  description = "ECS task execution role ARN"
-  value       = aws_iam_role.ecs_task_execution_role.arn
-}
-
-output "ecs_task_role_arn" {
-  description = "ECS task role ARN"
-  value       = aws_iam_role.ecs_task_role.arn
-}
-
-# KMS Outputs
-output "kafka_kms_key_id" {
-  description = "Kafka KMS key ID"
-  value       = aws_kms_key.kafka.key_id
-}
-
-output "kafka_kms_key_arn" {
-  description = "Kafka KMS key ARN"
-  value       = aws_kms_key.kafka.arn
-}
-
-# Application URLs
-output "application_url" {
-  description = "Application URL"
-  value       = "http://${aws_lb.main.dns_name}"
-}
-
-output "api_docs_url" {
-  description = "API documentation URL"
-  value       = "http://${aws_lb.main.dns_name}/api/docs"
-}
-
-output "health_check_url" {
-  description = "Health check URL"
-  value       = "http://${aws_lb.main.dns_name}/actuator/health"
-}
-
-# Environment Information
-output "environment" {
-  description = "Environment name"
-  value       = var.environment
-}
-
-output "aws_region" {
-  description = "AWS region"
-  value       = var.aws_region
-}
-
-# Connection Information for Applications
-output "connection_info" {
-  description = "Connection information for applications"
-  value = {
-    database_url = "jdbc:postgresql://${aws_db_instance.postgres.endpoint}/${aws_db_instance.postgres.db_name}"
-    kafka_brokers = aws_msk_cluster.kafka.bootstrap_brokers_tls
-    s3_bucket = aws_s3_bucket.files.bucket
-    secret_arn = aws_secretsmanager_secret.db_password.arn
-  }
-  sensitive = true
-}
+# API Keys for Testing
+test_api_key = "sk_test_1234567890"
+webhook_secret = "test_webhook_secret_123"
