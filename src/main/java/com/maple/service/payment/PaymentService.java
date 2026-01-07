@@ -540,6 +540,215 @@ public class PaymentService {
     }
 
     /**
+     * Retries a failed payment by resetting its status to APPROVED if it was previously approved,
+     * or to CREATED if it didn't require approval.
+     * 
+     * @param paymentId The payment ID to retry
+     * @param retryBy The ID of the user initiating the retry
+     * @param retryReason Optional reason for the retry
+     * @return The payment with updated status
+     * @throws PaymentNotFoundException if payment does not exist
+     * @throws PaymentStateException if payment cannot be retried
+     */
+    public Payment retryFailedPayment(UUID paymentId, UUID retryBy, String retryReason) {
+        logger.info("Retrying failed payment: {} by user: {}", paymentId, retryBy);
+
+        Payment payment = getPaymentById(paymentId);
+
+        // Validate payment state
+        if (payment.getStatus() != PaymentStatus.FAILED) {
+            throw new PaymentStateException(
+                "Payment is not in FAILED status. Current status: " + payment.getStatus());
+        }
+
+        // Store previous status for audit
+        PaymentStatus previousStatus = payment.getStatus();
+
+        // Determine new status based on previous workflow
+        PaymentStatus newStatus;
+        if (payment.getApprovalRequired() && payment.getApprovedBy() != null) {
+            // Was approved before, set back to approved
+            newStatus = PaymentStatus.APPROVED;
+        } else if (!payment.getApprovalRequired()) {
+            // Didn't require approval, set back to created
+            newStatus = PaymentStatus.CREATED;
+        } else {
+            // This shouldn't happen but handle it
+            throw new PaymentStateException(
+                "Cannot determine appropriate retry status for payment: " + paymentId);
+        }
+
+        payment.setStatus(newStatus);
+        Payment savedPayment = paymentRepository.save(payment);
+
+        logger.info("Payment {} retried successfully, status changed from {} to {}", 
+                   paymentId, previousStatus, newStatus);
+
+        // Audit the retry
+        auditService.auditPaymentEvent(
+            retryBy.toString(),
+            "PAYMENT_RETRY",
+            paymentId
+        );
+
+        auditService.auditPaymentStatusChange(
+            retryBy.toString(),
+            paymentId,
+            previousStatus.toString(),
+            savedPayment.getStatus().toString()
+        );
+
+        // Publish retry event
+        publishRetryEvent(savedPayment, retryBy, retryReason, previousStatus);
+
+        return savedPayment;
+    }
+
+    /**
+     * Searches payments with multiple filter criteria.
+     * 
+     * @param paymentReference Optional payment reference filter (partial match)
+     * @param debtorAccount Optional debtor account filter (partial match)
+     * @param creditorAccount Optional creditor account filter (partial match)
+     * @param status Optional status filter
+     * @param initiatedBy Optional initiator user ID filter
+     * @param startDate Optional start date filter
+     * @param endDate Optional end date filter
+     * @param minAmountCents Optional minimum amount filter
+     * @param maxAmountCents Optional maximum amount filter
+     * @param currency Optional currency filter
+     * @param pageable Pagination parameters
+     * @return Page of matching payments
+     */
+    public Page<Payment> searchPayments(String paymentReference, String debtorAccount, 
+                                       String creditorAccount, PaymentStatus status,
+                                       UUID initiatedBy, OffsetDateTime startDate, 
+                                       OffsetDateTime endDate, Long minAmountCents,
+                                       Long maxAmountCents, String currency,
+                                       Pageable pageable) {
+        logger.debug("Searching payments with filters");
+
+        // First get results from repository search
+        Page<Payment> payments = paymentRepository.searchPayments(
+            paymentReference, debtorAccount, creditorAccount, status, 
+            initiatedBy, startDate, endDate, pageable
+        );
+
+        // Apply additional filters in memory if needed
+        if (minAmountCents != null || maxAmountCents != null || currency != null) {
+            List<Payment> filtered = payments.getContent().stream()
+                .filter(p -> minAmountCents == null || p.getAmountCents() >= minAmountCents)
+                .filter(p -> maxAmountCents == null || p.getAmountCents() <= maxAmountCents)
+                .filter(p -> currency == null || currency.equals(p.getCurrency()))
+                .collect(Collectors.toList());
+
+            // Create a new page with filtered content
+            // Note: This is a simplified approach - for production, filters should be in DB query
+            return new org.springframework.data.domain.PageImpl<>(
+                filtered, pageable, filtered.size());
+        }
+
+        return payments;
+    }
+
+    /**
+     * Gets payments that failed and may need retry.
+     * 
+     * @param hoursSinceFailure Hours since failure to consider
+     * @return List of failed payments
+     */
+    public List<Payment> getRetryableFailedPayments(int hoursSinceFailure) {
+        logger.debug("Getting retryable failed payments (failed within {} hours)", hoursSinceFailure);
+        
+        OffsetDateTime since = OffsetDateTime.now().minusHours(hoursSinceFailure);
+        return paymentRepository.findRecentFailures(since);
+    }
+
+    /**
+     * Validates if a payment status transition is allowed.
+     * 
+     * @param currentStatus Current payment status
+     * @param targetStatus Target payment status
+     * @return true if transition is allowed
+     */
+    public boolean isValidStatusTransition(PaymentStatus currentStatus, PaymentStatus targetStatus) {
+        // Terminal states cannot transition
+        if (currentStatus.isTerminal()) {
+            return false;
+        }
+
+        // Same status transition is always valid (idempotent)
+        if (currentStatus == targetStatus) {
+            return true;
+        }
+
+        // Define valid transitions
+        return switch (currentStatus) {
+            case CREATED -> targetStatus == PaymentStatus.PENDING_APPROVAL || 
+                           targetStatus == PaymentStatus.APPROVED ||
+                           targetStatus == PaymentStatus.CANCELLED;
+            case PENDING_APPROVAL -> targetStatus == PaymentStatus.APPROVED ||
+                                    targetStatus == PaymentStatus.REJECTED ||
+                                    targetStatus == PaymentStatus.CANCELLED;
+            case APPROVED -> targetStatus == PaymentStatus.SUBMITTED ||
+                            targetStatus == PaymentStatus.CANCELLED ||
+                            targetStatus == PaymentStatus.FAILED; // For retry scenarios
+            case SUBMITTED -> targetStatus == PaymentStatus.SETTLED ||
+                             targetStatus == PaymentStatus.FAILED;
+            case FAILED -> targetStatus == PaymentStatus.APPROVED ||
+                          targetStatus == PaymentStatus.CREATED; // For retry
+            default -> false;
+        };
+    }
+
+    /**
+     * Gets payments requiring attention (pending approval for too long, failed payments, etc.).
+     * 
+     * @param pendingApprovalHoursThreshold Hours threshold for pending approvals
+     * @return List of payments requiring attention
+     */
+    public List<Payment> getPaymentsRequiringAttention(int pendingApprovalHoursThreshold) {
+        logger.debug("Getting payments requiring attention");
+
+        List<Payment> attentionRequired = new ArrayList<>();
+        
+        // Find payments pending approval for too long
+        OffsetDateTime threshold = OffsetDateTime.now().minusHours(pendingApprovalHoursThreshold);
+        List<Payment> allPending = paymentRepository.findByStatus(PaymentStatus.PENDING_APPROVAL);
+        attentionRequired.addAll(
+            allPending.stream()
+                .filter(p -> p.getCreatedAt().isBefore(threshold))
+                .collect(Collectors.toList())
+        );
+        
+        // Find recent failures
+        attentionRequired.addAll(getRetryableFailedPayments(24));
+        
+        return attentionRequired;
+    }
+
+    /**
+     * Publishes payment retry event to Kafka.
+     */
+    private void publishRetryEvent(Payment payment, UUID retriedBy, String retryReason, PaymentStatus previousStatus) {
+        try {
+            PaymentEvents.PaymentStatusChanged event = new PaymentEvents.PaymentStatusChanged(
+                    payment.getId(),
+                    payment.getPaymentReference(),
+                    previousStatus,
+                    payment.getStatus(),
+                    retriedBy,
+                    retryReason != null ? retryReason : "Payment retried after failure"
+            );
+
+            kafkaTemplate.send("payments.events", payment.getId().toString(), event);
+            logger.debug("Published payment retry event for payment: {}", payment.getId());
+        } catch (Exception e) {
+            logger.error("Failed to publish payment retry event", e);
+        }
+    }
+
+    /**
      * Formats amount for display.
      */
     private String formatAmount(Long amountCents, String currency) {

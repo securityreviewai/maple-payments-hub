@@ -552,6 +552,205 @@ public class PaymentsController {
         return ResponseEntity.ok(response);
     }
 
+    @PostMapping("/{id}/retry")
+    @Operation(
+        summary = "Retry a failed payment",
+        description = "Retries a payment that previously failed. " +
+                     "Resets the payment status to allow reprocessing.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Payment retried successfully"),
+            @ApiResponse(responseCode = "400", description = "Payment cannot be retried"),
+            @ApiResponse(responseCode = "404", description = "Payment not found")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:write') or hasAuthority('ROLE_TREASURY_OPS')")
+    public ResponseEntity<PaymentResponseDto> retryPayment(
+            @Parameter(description = "Payment ID") @PathVariable UUID id,
+            @RequestBody(required = false) Map<String, String> retryData,
+            Authentication authentication) {
+
+        logger.info("Payment retry request for: {} by user: {}", id, authentication.getName());
+
+        String operationId = UUID.randomUUID().toString();
+
+        try {
+            UUID retryBy = UUID.fromString(authentication.getName());
+            String retryReason = retryData != null 
+                    ? retryData.get("retryReason") 
+                    : "Payment retry requested by user";
+
+            com.maple.model.Payment payment = paymentService.retryFailedPayment(id, retryBy, retryReason);
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for retry: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (PaymentService.PaymentStateException e) {
+            logger.warn("Invalid payment state for retry: {} - {}", id, e.getMessage());
+            throw new PaymentValidationException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error retrying payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to retry payment", e);
+        }
+    }
+
+    @GetMapping("/search")
+    @Operation(
+        summary = "Search payments with filters",
+        description = "Searches payments using multiple filter criteria. " +
+                     "Supports pagination and various filters including amount range, currency, status, etc.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Payments retrieved successfully")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_OPS') or hasAuthority('ROLE_AUDITOR')")
+    public ResponseEntity<Map<String, Object>> searchPayments(
+            @Parameter(description = "Payment reference (partial match)") 
+            @RequestParam(required = false) String paymentReference,
+            @Parameter(description = "Debtor account (partial match)") 
+            @RequestParam(required = false) String debtorAccount,
+            @Parameter(description = "Creditor account (partial match)") 
+            @RequestParam(required = false) String creditorAccount,
+            @Parameter(description = "Payment status") 
+            @RequestParam(required = false) com.maple.model.PaymentStatus status,
+            @Parameter(description = "Initiator user ID") 
+            @RequestParam(required = false) UUID initiatedBy,
+            @Parameter(description = "Start date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime startDate,
+            @Parameter(description = "End date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime endDate,
+            @Parameter(description = "Minimum amount in cents") 
+            @RequestParam(required = false) Long minAmountCents,
+            @Parameter(description = "Maximum amount in cents") 
+            @RequestParam(required = false) Long maxAmountCents,
+            @Parameter(description = "Currency code") 
+            @RequestParam(required = false) String currency,
+            @Parameter(description = "Page number (0-indexed)") 
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size") 
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+
+        logger.debug("Payment search request by user: {}", authentication.getName());
+
+        org.springframework.data.domain.Pageable pageable = 
+            org.springframework.data.domain.PageRequest.of(page, size);
+
+        org.springframework.data.domain.Page<com.maple.model.Payment> payments = 
+            paymentService.searchPayments(
+                paymentReference, debtorAccount, creditorAccount, status,
+                initiatedBy, startDate, endDate, minAmountCents,
+                maxAmountCents, currency, pageable
+            );
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", payments.getContent().stream()
+            .map(p -> paymentService.convertToResponseDto(p, UUID.randomUUID().toString()))
+            .collect(Collectors.toList()));
+        response.put("totalElements", payments.getTotalElements());
+        response.put("totalPages", payments.getTotalPages());
+        response.put("currentPage", page);
+        response.put("pageSize", size);
+
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/retryable-failures")
+    @Operation(
+        summary = "Get retryable failed payments",
+        description = "Retrieves payments that failed and may be eligible for retry.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Failed payments retrieved")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_OPS')")
+    public ResponseEntity<List<PaymentResponseDto>> getRetryableFailedPayments(
+            @Parameter(description = "Hours since failure") 
+            @RequestParam(defaultValue = "24") int hoursSinceFailure,
+            Authentication authentication) {
+
+        logger.debug("Retrieving retryable failed payments by user: {}", authentication.getName());
+
+        List<com.maple.model.Payment> failedPayments = 
+            paymentService.getRetryableFailedPayments(hoursSinceFailure);
+
+        List<PaymentResponseDto> response = failedPayments.stream()
+            .map(p -> paymentService.convertToResponseDto(p, UUID.randomUUID().toString()))
+            .collect(Collectors.toList());
+
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/requiring-attention")
+    @Operation(
+        summary = "Get payments requiring attention",
+        description = "Retrieves payments that require attention such as pending approvals " +
+                     "for too long or failed payments that may need retry.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Payments requiring attention retrieved")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<List<PaymentResponseDto>> getPaymentsRequiringAttention(
+            @Parameter(description = "Hours threshold for pending approvals") 
+            @RequestParam(defaultValue = "48") int pendingApprovalHoursThreshold,
+            Authentication authentication) {
+
+        logger.debug("Retrieving payments requiring attention by user: {}", authentication.getName());
+
+        List<com.maple.model.Payment> attentionRequired = 
+            paymentService.getPaymentsRequiringAttention(pendingApprovalHoursThreshold);
+
+        List<PaymentResponseDto> response = attentionRequired.stream()
+            .map(p -> paymentService.convertToResponseDto(p, UUID.randomUUID().toString()))
+            .collect(Collectors.toList());
+
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{id}/status-transition-check")
+    @Operation(
+        summary = "Check if status transition is valid",
+        description = "Validates if a payment can transition from its current status to a target status.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Transition validity checked")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_OPS')")
+    public ResponseEntity<Map<String, Object>> checkStatusTransition(
+            @Parameter(description = "Payment ID") @PathVariable UUID id,
+            @Parameter(description = "Target status") 
+            @RequestParam com.maple.model.PaymentStatus targetStatus,
+            Authentication authentication) {
+
+        logger.debug("Checking status transition for payment: {} to status: {}", id, targetStatus);
+
+        try {
+            com.maple.model.Payment payment = paymentService.findPaymentById(id);
+            boolean isValid = paymentService.isValidStatusTransition(
+                payment.getStatus(), targetStatus);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("paymentId", id);
+            response.put("currentStatus", payment.getStatus());
+            response.put("targetStatus", targetStatus);
+            response.put("transitionValid", isValid);
+            response.put("message", isValid 
+                ? "Transition is allowed" 
+                : "Transition is not allowed from current status");
+
+            return ResponseEntity.ok(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found: {}", id);
+            throw new PaymentNotFoundException(e.getMessage());
+        }
+    }
+
     // Exception classes for this controller
     
     @ResponseStatus(HttpStatus.BAD_REQUEST)
