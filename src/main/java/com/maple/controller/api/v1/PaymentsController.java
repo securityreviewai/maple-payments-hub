@@ -2,6 +2,7 @@ package com.maple.controller.api.v1;
 
 import com.maple.dto.PaymentRequestDto;
 import com.maple.dto.PaymentResponseDto;
+import com.maple.service.payment.PaymentService;
 import com.maple.service.payment.PaymentSubmissionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -39,10 +40,13 @@ public class PaymentsController {
     private static final Logger logger = LoggerFactory.getLogger(PaymentsController.class);
 
     private final PaymentSubmissionService paymentSubmissionService;
+    private final PaymentService paymentService;
 
     @Autowired
-    public PaymentsController(PaymentSubmissionService paymentSubmissionService) {
+    public PaymentsController(PaymentSubmissionService paymentSubmissionService,
+                             PaymentService paymentService) {
         this.paymentSubmissionService = paymentSubmissionService;
+        this.paymentService = paymentService;
     }
 
     @PostMapping
@@ -118,10 +122,36 @@ public class PaymentsController {
 
         logger.debug("Retrieving payment: {} for user: {}", id, authentication.getName());
 
-        // TODO: Implement payment retrieval with appropriate field masking
-        // based on user roles and permissions
-        
-        return ResponseEntity.ok().build();
+        String operationId = UUID.randomUUID().toString();
+
+        try {
+            // Get payment (without locking since this is a read operation)
+            com.maple.model.Payment payment = paymentService.findPaymentById(id);
+            
+            // Convert to DTO
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+            
+            // Apply field masking based on user roles
+            // Treasury ops and auditors see masked accounts
+            boolean hasFullAccess = authentication.getAuthorities().stream()
+                    .anyMatch(auth -> auth.getAuthority().contains("ROLE_CLEARING") ||
+                                   auth.getAuthority().contains("ROLE_TREASURY_MANAGER"));
+            
+            if (!hasFullAccess) {
+                response = response.maskSensitiveFields();
+            }
+            
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error retrieving payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to retrieve payment", e);
+        }
     }
 
     @PostMapping("/{id}/approve")
@@ -147,13 +177,38 @@ public class PaymentsController {
         logger.info("Payment approval request for: {} by user: {}", id, authentication.getName());
 
         String operationId = requestId != null ? requestId : UUID.randomUUID().toString();
-        
-        // TODO: Implement payment approval logic
-        // Extract approval note from request body
-        // Verify 2FA if required
-        // Update payment status and publish events
-        
-        return ResponseEntity.ok().build();
+
+        try {
+            // Extract user ID from authentication
+            UUID approverId = UUID.fromString(authentication.getName());
+            
+            // Extract approval note and 2FA verification from request body
+            String approvalNote = approvalData != null ? approvalData.get("approvalNote") : null;
+            Boolean twoFactorVerified = approvalData != null && approvalData.containsKey("twoFactorVerified") 
+                    ? Boolean.parseBoolean(approvalData.get("twoFactorVerified")) 
+                    : false;
+            
+            // Approve the payment
+            com.maple.model.Payment payment = paymentService.approvePayment(
+                    id, approverId, approvalNote, twoFactorVerified);
+            
+            // Convert to response DTO
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+            
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for approval: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (PaymentService.PaymentStateException e) {
+            logger.warn("Invalid payment state for approval: {} - {}", id, e.getMessage());
+            throw new PaymentValidationException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error approving payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to approve payment", e);
+        }
     }
 
     @PostMapping("/{id}/reject")
@@ -174,9 +229,40 @@ public class PaymentsController {
 
         logger.info("Payment rejection request for: {} by user: {}", id, authentication.getName());
 
-        // TODO: Implement payment rejection logic
-        
-        return ResponseEntity.ok().build();
+        String operationId = UUID.randomUUID().toString();
+
+        try {
+            // Extract user ID from authentication
+            UUID rejectorId = UUID.fromString(authentication.getName());
+            
+            // Extract rejection reason from request body (required)
+            String rejectionReason = rejectionData != null ? rejectionData.get("rejectionReason") : null;
+            if (rejectionReason == null || rejectionReason.trim().isEmpty()) {
+                throw new PaymentValidationException("Rejection reason is required");
+            }
+            
+            // Reject the payment
+            com.maple.model.Payment payment = paymentService.rejectPayment(id, rejectorId, rejectionReason);
+            
+            // Convert to response DTO
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+            
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for rejection: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (PaymentService.PaymentStateException e) {
+            logger.warn("Invalid payment state for rejection: {} - {}", id, e.getMessage());
+            throw new PaymentValidationException(e.getMessage());
+        } catch (PaymentValidationException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Unexpected error rejecting payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to reject payment", e);
+        }
     }
 
     @PostMapping("/{id}/cancel")
@@ -197,9 +283,37 @@ public class PaymentsController {
 
         logger.info("Payment cancellation request for: {} by user: {}", id, authentication.getName());
 
-        // TODO: Implement payment cancellation logic
-        
-        return ResponseEntity.ok().build();
+        String operationId = UUID.randomUUID().toString();
+
+        try {
+            // Extract user ID from authentication
+            UUID cancellerId = UUID.fromString(authentication.getName());
+            
+            // Extract cancellation reason from request body (optional)
+            String cancellationReason = cancellationData != null 
+                    ? cancellationData.get("cancellationReason") 
+                    : "Cancelled by user";
+            
+            // Cancel the payment
+            com.maple.model.Payment payment = paymentService.cancelPayment(id, cancellerId, cancellationReason);
+            
+            // Convert to response DTO
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+            
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for cancellation: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (PaymentService.PaymentStateException e) {
+            logger.warn("Invalid payment state for cancellation: {} - {}", id, e.getMessage());
+            throw new PaymentValidationException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error cancelling payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to cancel payment", e);
+        }
     }
 
     @PostMapping("/{id}/submit-to-clearing")
@@ -235,6 +349,13 @@ public class PaymentsController {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public static class PaymentValidationException extends RuntimeException {
         public PaymentValidationException(String message) {
+            super(message);
+        }
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public static class PaymentNotFoundException extends RuntimeException {
+        public PaymentNotFoundException(String message) {
             super(message);
         }
     }
