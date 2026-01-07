@@ -3,6 +3,7 @@ package com.maple.controller.api.v1;
 import com.maple.dto.PaymentRequestDto;
 import com.maple.dto.PaymentResponseDto;
 import com.maple.service.payment.PaymentService;
+import com.maple.service.payment.PaymentStatisticsService;
 import com.maple.service.payment.PaymentSubmissionService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
@@ -21,8 +22,12 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.OffsetDateTime;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * REST controller for payment operations.
@@ -41,12 +46,15 @@ public class PaymentsController {
 
     private final PaymentSubmissionService paymentSubmissionService;
     private final PaymentService paymentService;
+    private final PaymentStatisticsService paymentStatisticsService;
 
     @Autowired
     public PaymentsController(PaymentSubmissionService paymentSubmissionService,
-                             PaymentService paymentService) {
+                             PaymentService paymentService,
+                             PaymentStatisticsService paymentStatisticsService) {
         this.paymentSubmissionService = paymentSubmissionService;
         this.paymentService = paymentService;
+        this.paymentStatisticsService = paymentStatisticsService;
     }
 
     @PostMapping
@@ -342,6 +350,206 @@ public class PaymentsController {
         // Update payment status
         
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/batch/approve")
+    @Operation(
+        summary = "Batch approve multiple payments",
+        description = "Approves multiple payments in a single operation. " +
+                     "Returns results for each payment indicating success or failure.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Batch approval processed"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "403", description = "Insufficient permissions")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_approval:write') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<Map<String, Object>> batchApprovePayments(
+            @RequestBody Map<String, Object> batchRequest,
+            Authentication authentication) {
+
+        logger.info("Batch approval request for {} payments by user: {}", 
+                   batchRequest.get("paymentIds"), authentication.getName());
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<String> paymentIdStrings = (List<String>) batchRequest.get("paymentIds");
+            List<UUID> paymentIds = paymentIdStrings.stream()
+                .map(UUID::fromString)
+                .collect(Collectors.toList());
+
+            UUID approverId = UUID.fromString(authentication.getName());
+            String approvalNote = (String) batchRequest.get("approvalNote");
+            Boolean twoFactorVerified = batchRequest.containsKey("twoFactorVerified") 
+                ? Boolean.valueOf(batchRequest.get("twoFactorVerified").toString()) 
+                : false;
+
+            Map<UUID, PaymentService.BatchOperationResult> results = 
+                paymentService.batchApprovePayments(paymentIds, approverId, approvalNote, twoFactorVerified);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("totalProcessed", paymentIds.size());
+            response.put("successCount", results.values().stream().mapToLong(r -> r.isSuccess() ? 1 : 0).sum());
+            response.put("failureCount", results.values().stream().mapToLong(r -> r.isSuccess() ? 0 : 1).sum());
+            response.put("results", results);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Error processing batch approval", e);
+            throw new PaymentProcessingException("Batch approval failed", e);
+        }
+    }
+
+    @PostMapping("/batch/reject")
+    @Operation(
+        summary = "Batch reject multiple payments",
+        description = "Rejects multiple payments in a single operation.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Batch rejection processed"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "403", description = "Insufficient permissions")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_approval:write') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<Map<String, Object>> batchRejectPayments(
+            @RequestBody Map<String, Object> batchRequest,
+            Authentication authentication) {
+
+        logger.info("Batch rejection request for {} payments by user: {}", 
+                   batchRequest.get("paymentIds"), authentication.getName());
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<String> paymentIdStrings = (List<String>) batchRequest.get("paymentIds");
+            List<UUID> paymentIds = paymentIdStrings.stream()
+                .map(UUID::fromString)
+                .collect(Collectors.toList());
+
+            UUID rejectorId = UUID.fromString(authentication.getName());
+            String rejectionReason = (String) batchRequest.get("rejectionReason");
+            
+            if (rejectionReason == null || rejectionReason.trim().isEmpty()) {
+                throw new PaymentValidationException("Rejection reason is required for batch rejection");
+            }
+
+            Map<UUID, PaymentService.BatchOperationResult> results = 
+                paymentService.batchRejectPayments(paymentIds, rejectorId, rejectionReason);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("totalProcessed", paymentIds.size());
+            response.put("successCount", results.values().stream().mapToLong(r -> r.isSuccess() ? 1 : 0).sum());
+            response.put("failureCount", results.values().stream().mapToLong(r -> r.isSuccess() ? 0 : 1).sum());
+            response.put("results", results);
+
+            return ResponseEntity.ok(response);
+
+        } catch (PaymentValidationException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Error processing batch rejection", e);
+            throw new PaymentProcessingException("Batch rejection failed", e);
+        }
+    }
+
+    @GetMapping("/{id}/history")
+    @Operation(
+        summary = "Get payment history",
+        description = "Retrieves the complete history and audit trail for a payment.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Payment history retrieved"),
+            @ApiResponse(responseCode = "404", description = "Payment not found")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_OPS') or hasAuthority('ROLE_AUDITOR')")
+    public ResponseEntity<List<PaymentService.PaymentHistoryEntry>> getPaymentHistory(
+            @Parameter(description = "Payment ID") @PathVariable UUID id,
+            Authentication authentication) {
+
+        logger.debug("Retrieving payment history for: {} by user: {}", id, authentication.getName());
+
+        try {
+            List<PaymentService.PaymentHistoryEntry> history = paymentService.getPaymentHistory(id);
+            return ResponseEntity.ok(history);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for history retrieval: {}", id);
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Error retrieving payment history: {}", id, e);
+            throw new PaymentProcessingException("Failed to retrieve payment history", e);
+        }
+    }
+
+    @GetMapping("/statistics")
+    @Operation(
+        summary = "Get payment statistics",
+        description = "Retrieves aggregated payment statistics and metrics.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Statistics retrieved")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_audit:read') or hasAuthority('ROLE_AUDITOR') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<Map<String, Object>> getPaymentStatistics(
+            @Parameter(description = "Start date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime startDate,
+            @Parameter(description = "End date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime endDate,
+            Authentication authentication) {
+
+        logger.debug("Retrieving payment statistics by user: {}", authentication.getName());
+
+        OffsetDateTime start = startDate != null ? startDate : OffsetDateTime.now().minusDays(30);
+        OffsetDateTime end = endDate != null ? endDate : OffsetDateTime.now();
+
+        Map<String, Object> statistics = new HashMap<>();
+        statistics.put("overallStatistics", paymentStatisticsService.getOverallStatistics());
+        statistics.put("totalVolume", paymentStatisticsService.calculateTotalVolume(start, end));
+        statistics.put("averagePaymentAmount", paymentStatisticsService.calculateAveragePaymentAmount(start, end));
+        statistics.put("successRate", paymentStatisticsService.calculateSuccessRate(start, end));
+        statistics.put("approvalRate", paymentStatisticsService.calculateApprovalRate(start, end));
+        statistics.put("statusBreakdown", paymentStatisticsService.getStatusBreakdown(start, end));
+        statistics.put("pendingApprovalsCount", paymentStatisticsService.getPendingApprovalsCount());
+        statistics.put("periodStart", start);
+        statistics.put("periodEnd", end);
+
+        return ResponseEntity.ok(statistics);
+    }
+
+    @GetMapping("/pending-approvals")
+    @Operation(
+        summary = "Get pending approvals",
+        description = "Retrieves payments that are pending approval with pagination.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Pending approvals retrieved")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_approval:write') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<Map<String, Object>> getPendingApprovals(
+            @Parameter(description = "Page number (0-indexed)") 
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size") 
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+
+        logger.debug("Retrieving pending approvals by user: {}", authentication.getName());
+
+        org.springframework.data.domain.Pageable pageable = 
+            org.springframework.data.domain.PageRequest.of(page, size);
+        
+        org.springframework.data.domain.Page<com.maple.model.Payment> pendingPayments = 
+            paymentService.getPendingApprovals(pageable);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", pendingPayments.getContent().stream()
+            .map(p -> paymentService.convertToResponseDto(p, UUID.randomUUID().toString()))
+            .collect(Collectors.toList()));
+        response.put("totalElements", pendingPayments.getTotalElements());
+        response.put("totalPages", pendingPayments.getTotalPages());
+        response.put("currentPage", page);
+        response.put("pageSize", size);
+
+        return ResponseEntity.ok(response);
     }
 
     // Exception classes for this controller

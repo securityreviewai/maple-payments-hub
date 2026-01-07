@@ -9,11 +9,18 @@ import com.maple.service.audit.AuditService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * Service for payment lifecycle management operations.
@@ -307,11 +314,323 @@ public class PaymentService {
     }
 
     /**
+     * Batch approves multiple payments.
+     * 
+     * @param paymentIds List of payment IDs to approve
+     * @param approverId The ID of the user approving the payments
+     * @param approvalNote Optional note for the approvals
+     * @param twoFactorVerified Whether 2FA was verified
+     * @return Map with payment IDs as keys and results (success/error) as values
+     */
+    public Map<UUID, BatchOperationResult> batchApprovePayments(
+            List<UUID> paymentIds, UUID approverId, String approvalNote, Boolean twoFactorVerified) {
+        logger.info("Processing batch approval for {} payments by approver: {}", paymentIds.size(), approverId);
+        
+        return paymentIds.stream().collect(Collectors.toMap(
+            paymentId -> paymentId,
+            paymentId -> {
+                try {
+                    approvePayment(paymentId, approverId, approvalNote, twoFactorVerified);
+                    return new BatchOperationResult(true, "Payment approved successfully", null);
+                } catch (PaymentNotFoundException e) {
+                    logger.warn("Payment not found in batch approval: {}", paymentId);
+                    return new BatchOperationResult(false, "Payment not found", e.getMessage());
+                } catch (PaymentStateException e) {
+                    logger.warn("Invalid state for batch approval: {} - {}", paymentId, e.getMessage());
+                    return new BatchOperationResult(false, "Invalid payment state", e.getMessage());
+                } catch (Exception e) {
+                    logger.error("Error in batch approval for payment: {}", paymentId, e);
+                    return new BatchOperationResult(false, "Approval failed", e.getMessage());
+                }
+            }
+        ));
+    }
+
+    /**
+     * Batch rejects multiple payments.
+     * 
+     * @param paymentIds List of payment IDs to reject
+     * @param rejectorId The ID of the user rejecting the payments
+     * @param rejectionReason Reason for rejection
+     * @return Map with payment IDs as keys and results (success/error) as values
+     */
+    public Map<UUID, BatchOperationResult> batchRejectPayments(
+            List<UUID> paymentIds, UUID rejectorId, String rejectionReason) {
+        logger.info("Processing batch rejection for {} payments by rejector: {}", paymentIds.size(), rejectorId);
+        
+        return paymentIds.stream().collect(Collectors.toMap(
+            paymentId -> paymentId,
+            paymentId -> {
+                try {
+                    rejectPayment(paymentId, rejectorId, rejectionReason);
+                    return new BatchOperationResult(true, "Payment rejected successfully", null);
+                } catch (PaymentNotFoundException e) {
+                    logger.warn("Payment not found in batch rejection: {}", paymentId);
+                    return new BatchOperationResult(false, "Payment not found", e.getMessage());
+                } catch (PaymentStateException e) {
+                    logger.warn("Invalid state for batch rejection: {} - {}", paymentId, e.getMessage());
+                    return new BatchOperationResult(false, "Invalid payment state", e.getMessage());
+                } catch (Exception e) {
+                    logger.error("Error in batch rejection for payment: {}", paymentId, e);
+                    return new BatchOperationResult(false, "Rejection failed", e.getMessage());
+                }
+            }
+        ));
+    }
+
+    /**
+     * Retrieves payments pending approval with pagination.
+     * 
+     * @param pageable Pagination parameters
+     * @return Page of payments pending approval
+     */
+    public Page<Payment> getPendingApprovals(Pageable pageable) {
+        logger.debug("Retrieving pending approvals with pagination");
+        return paymentRepository.findPendingApprovals(pageable);
+    }
+
+    /**
+     * Retrieves payment history/audit trail for a payment.
+     * This method fetches all status changes and related events.
+     * 
+     * @param paymentId The payment ID
+     * @return List of payment status changes with timestamps
+     */
+    public List<PaymentHistoryEntry> getPaymentHistory(UUID paymentId) {
+        logger.debug("Retrieving payment history for: {}", paymentId);
+        
+        Payment payment = findPaymentById(paymentId);
+        List<PaymentHistoryEntry> history = new ArrayList<>();
+        
+        // Add creation entry
+        history.add(new PaymentHistoryEntry(
+            payment.getCreatedAt(),
+            "CREATED",
+            "Payment created",
+            payment.getInitiatedBy(),
+            null
+        ));
+        
+        // Add approval required status if applicable
+        if (payment.getApprovalRequired() && payment.getStatus() == PaymentStatus.PENDING_APPROVAL) {
+            history.add(new PaymentHistoryEntry(
+                payment.getUpdatedAt(),
+                "PENDING_APPROVAL",
+                "Awaiting approval",
+                null,
+                null
+            ));
+        }
+        
+        // Add approval entry if approved
+        if (payment.getApprovedBy() != null && payment.getStatus() == PaymentStatus.APPROVED) {
+            history.add(new PaymentHistoryEntry(
+                payment.getUpdatedAt(),
+                "APPROVED",
+                "Payment approved",
+                payment.getApprovedBy(),
+                null
+            ));
+        }
+        
+        // Add rejection entry if rejected
+        if (payment.getStatus() == PaymentStatus.REJECTED) {
+            history.add(new PaymentHistoryEntry(
+                payment.getUpdatedAt(),
+                "REJECTED",
+                "Payment rejected",
+                null,
+                null
+            ));
+        }
+        
+        // Add submission entry if submitted
+        if (payment.getSubmittedAt() != null) {
+            history.add(new PaymentHistoryEntry(
+                payment.getSubmittedAt(),
+                "SUBMITTED",
+                "Submitted to clearing network",
+                null,
+                payment.getBatchId()
+            ));
+        }
+        
+        // Add settlement entry if settled
+        if (payment.getSettledAt() != null) {
+            history.add(new PaymentHistoryEntry(
+                payment.getSettledAt(),
+                "SETTLED",
+                "Payment settled",
+                null,
+                null
+            ));
+        }
+        
+        // Add cancellation entry if cancelled
+        if (payment.getStatus() == PaymentStatus.CANCELLED) {
+            history.add(new PaymentHistoryEntry(
+                payment.getUpdatedAt(),
+                "CANCELLED",
+                "Payment cancelled",
+                null,
+                null
+            ));
+        }
+        
+        // Add failure entry if failed
+        if (payment.getStatus() == PaymentStatus.FAILED) {
+            history.add(new PaymentHistoryEntry(
+                payment.getUpdatedAt(),
+                "FAILED",
+                "Payment processing failed",
+                null,
+                null
+            ));
+        }
+        
+        return history;
+    }
+
+    /**
+     * Calculates payment statistics for a user within a time period.
+     * 
+     * @param userId User ID
+     * @param startDate Start of period
+     * @param endDate End of period
+     * @return Payment statistics
+     */
+    public PaymentStatistics calculateUserStatistics(UUID userId, OffsetDateTime startDate, OffsetDateTime endDate) {
+        logger.debug("Calculating statistics for user: {} from {} to {}", userId, startDate, endDate);
+        
+        Long totalAmount = paymentRepository.calculateTotalAmountForUserInPeriod(userId, startDate, endDate);
+        
+        List<Payment> userPayments = paymentRepository.findByInitiatedBy(
+            userId, 
+            org.springframework.data.domain.Pageable.unpaged()
+        ).getContent();
+        
+        long countByStatus = userPayments.stream()
+            .filter(p -> p.getCreatedAt().isAfter(startDate) && p.getCreatedAt().isBefore(endDate))
+            .count();
+        
+        long approvedCount = userPayments.stream()
+            .filter(p -> p.getStatus() == PaymentStatus.APPROVED || p.getStatus() == PaymentStatus.SETTLED || p.getStatus() == PaymentStatus.SUBMITTED)
+            .filter(p -> p.getCreatedAt().isAfter(startDate) && p.getCreatedAt().isBefore(endDate))
+            .count();
+        
+        long pendingCount = userPayments.stream()
+            .filter(p -> p.getStatus() == PaymentStatus.PENDING_APPROVAL)
+            .filter(p -> p.getCreatedAt().isAfter(startDate) && p.getCreatedAt().isBefore(endDate))
+            .count();
+        
+        long rejectedCount = userPayments.stream()
+            .filter(p -> p.getStatus() == PaymentStatus.REJECTED)
+            .filter(p -> p.getCreatedAt().isAfter(startDate) && p.getCreatedAt().isBefore(endDate))
+            .count();
+        
+        return new PaymentStatistics(
+            countByStatus,
+            approvedCount,
+            pendingCount,
+            rejectedCount,
+            totalAmount != null ? totalAmount : 0L,
+            startDate,
+            endDate
+        );
+    }
+
+    /**
      * Formats amount for display.
      */
     private String formatAmount(Long amountCents, String currency) {
         if (amountCents == null) return "0.00";
         return String.format("%.2f %s", amountCents / 100.0, currency);
+    }
+
+    /**
+     * Result class for batch operations.
+     */
+    public static class BatchOperationResult {
+        private final boolean success;
+        private final String message;
+        private final String errorDetails;
+
+        public BatchOperationResult(boolean success, String message, String errorDetails) {
+            this.success = success;
+            this.message = message;
+            this.errorDetails = errorDetails;
+        }
+
+        public boolean isSuccess() { return success; }
+        public String getMessage() { return message; }
+        public String getErrorDetails() { return errorDetails; }
+    }
+
+    /**
+     * Payment history entry representing a status change.
+     */
+    public static class PaymentHistoryEntry {
+        private final OffsetDateTime timestamp;
+        private final String status;
+        private final String description;
+        private final UUID actorId;
+        private final String additionalInfo;
+
+        public PaymentHistoryEntry(OffsetDateTime timestamp, String status, String description, 
+                                  UUID actorId, String additionalInfo) {
+            this.timestamp = timestamp;
+            this.status = status;
+            this.description = description;
+            this.actorId = actorId;
+            this.additionalInfo = additionalInfo;
+        }
+
+        public OffsetDateTime getTimestamp() { return timestamp; }
+        public String getStatus() { return status; }
+        public String getDescription() { return description; }
+        public UUID getActorId() { return actorId; }
+        public String getAdditionalInfo() { return additionalInfo; }
+    }
+
+    /**
+     * Payment statistics for a user within a time period.
+     */
+    public static class PaymentStatistics {
+        private final long totalCount;
+        private final long approvedCount;
+        private final long pendingCount;
+        private final long rejectedCount;
+        private final long totalAmountCents;
+        private final OffsetDateTime periodStart;
+        private final OffsetDateTime periodEnd;
+
+        public PaymentStatistics(long totalCount, long approvedCount, long pendingCount, 
+                               long rejectedCount, long totalAmountCents,
+                               OffsetDateTime periodStart, OffsetDateTime periodEnd) {
+            this.totalCount = totalCount;
+            this.approvedCount = approvedCount;
+            this.pendingCount = pendingCount;
+            this.rejectedCount = rejectedCount;
+            this.totalAmountCents = totalAmountCents;
+            this.periodStart = periodStart;
+            this.periodEnd = periodEnd;
+        }
+
+        public long getTotalCount() { return totalCount; }
+        public long getApprovedCount() { return approvedCount; }
+        public long getPendingCount() { return pendingCount; }
+        public long getRejectedCount() { return rejectedCount; }
+        public long getTotalAmountCents() { return totalAmountCents; }
+        public OffsetDateTime getPeriodStart() { return periodStart; }
+        public OffsetDateTime getPeriodEnd() { return periodEnd; }
+        
+        public double getApprovalRate() {
+            return totalCount > 0 ? (double) approvedCount / totalCount * 100.0 : 0.0;
+        }
+        
+        public double getRejectionRate() {
+            return totalCount > 0 ? (double) rejectedCount / totalCount * 100.0 : 0.0;
+        }
     }
 
     /**
