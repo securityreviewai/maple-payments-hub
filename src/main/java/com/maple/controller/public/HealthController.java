@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.actuator.health.Health;
 import org.springframework.boot.actuator.health.HealthEndpoint;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -66,5 +67,56 @@ public class HealthController {
             "message", "pong",
             "service", "maple-payments-hub"
         ));
+    }
+
+    @GetMapping("/health/detailed")
+    @Operation(
+        summary = "Detailed health check",
+        description = "Returns detailed health information including component status"
+    )
+    public ResponseEntity<Map<String, Object>> detailedHealth() {
+        Health health = healthEndpoint.health();
+        
+        Map<String, Object> response = new java.util.HashMap<>();
+        response.put("status", health.getStatus().getCode());
+        response.put("timestamp", System.currentTimeMillis());
+        response.put("components", health.getDetails());
+        
+        HttpStatus status = health.getStatus().getCode().equals("UP") 
+            ? HttpStatus.OK 
+            : HttpStatus.SERVICE_UNAVAILABLE;
+        
+        return ResponseEntity.status(status).body(response);
+    }
+
+    @GetMapping("/readiness")
+    @Operation(
+        summary = "Readiness probe",
+        description = "Indicates if the service is ready to accept traffic"
+    )
+    public ResponseEntity<Map<String, Object>> readiness() {
+        Health health = healthEndpoint.health();
+        boolean isReady = health.getStatus().getCode().equals("UP");
+        
+        Map<String, Object> response = new java.util.HashMap<>();
+        response.put("ready", isReady);
+        response.put("timestamp", System.currentTimeMillis());
+        
+        return ResponseEntity.status(isReady ? HttpStatus.OK : HttpStatus.SERVICE_UNAVAILABLE)
+                .body(response);
+    }
+
+    @GetMapping("/liveness")
+    @Operation(
+        summary = "Liveness probe",
+        description = "Indicates if the service is alive and running"
+    )
+    public ResponseEntity<Map<String, Object>> liveness() {
+        Map<String, Object> response = new java.util.HashMap<>();
+        response.put("alive", true);
+        response.put("timestamp", System.currentTimeMillis());
+        response.put("service", "maple-payments-hub");
+        
+        return ResponseEntity.ok(response);
     }
 }

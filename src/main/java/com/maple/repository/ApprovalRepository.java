@@ -92,4 +92,43 @@ public interface ApprovalRepository extends JpaRepository<Approval, UUID> {
      */
     @Query("SELECT a FROM Approval a WHERE a.createdAt >= :since ORDER BY a.createdAt DESC")
     List<Approval> findRecentActivity(@Param("since") OffsetDateTime since);
+
+    /**
+     * Find approvals by payment ID with pagination.
+     */
+    Page<Approval> findByPaymentId(UUID paymentId, Pageable pageable);
+
+    /**
+     * Find approvals by approver and action type.
+     */
+    List<Approval> findByApproverIdAndAction(UUID approverId, Approval.ApprovalAction action);
+
+    /**
+     * Count approvals for a specific payment.
+     */
+    Long countByPaymentId(UUID paymentId);
+
+    /**
+     * Find approvals that were not verified with two-factor authentication.
+     */
+    @Query("SELECT a FROM Approval a WHERE a.twoFactorVerified = false AND a.action = 'APPROVED' " +
+           "AND a.createdAt >= :since")
+    List<Approval> findUnverifiedApprovalsSince(@Param("since") OffsetDateTime since);
+
+    /**
+     * Get approval statistics for an approver in a date range.
+     */
+    @Query("SELECT a.action, COUNT(a) FROM Approval a " +
+           "WHERE a.approverId = :approverId " +
+           "AND a.createdAt >= :startDate AND a.createdAt <= :endDate " +
+           "GROUP BY a.action")
+    List<Object[]> getApprovalStatisticsForApprover(@Param("approverId") UUID approverId,
+                                                     @Param("startDate") OffsetDateTime startDate,
+                                                     @Param("endDate") OffsetDateTime endDate);
+
+    /**
+     * Find the first approval for a payment.
+     */
+    @Query("SELECT a FROM Approval a WHERE a.paymentId = :paymentId ORDER BY a.createdAt ASC")
+    Optional<Approval> findFirstByPaymentId(@Param("paymentId") UUID paymentId);
 }
