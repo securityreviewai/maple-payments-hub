@@ -94,6 +94,40 @@ public class Approval {
         return action == ApprovalAction.REJECTED;
     }
 
+    /**
+     * Updates the approval note.
+     * 
+     * @param newNote New note to set
+     */
+    public void updateNote(String newNote) {
+        this.note = newNote;
+    }
+
+    /**
+     * @return true if this approval has a note
+     */
+    public boolean hasNote() {
+        return note != null && !note.trim().isEmpty();
+    }
+
+    /**
+     * @return true if two-factor authentication was verified for this approval
+     */
+    public boolean isSecurelyVerified() {
+        return twoFactorVerified != null && twoFactorVerified;
+    }
+
+    /**
+     * Gets a summary description of this approval.
+     * 
+     * @return Summary string
+     */
+    public String getSummary() {
+        String actionDesc = isApproval() ? "Approved" : "Rejected";
+        String verified = isSecurelyVerified() ? " (2FA verified)" : "";
+        return actionDesc + verified;
+    }
+
     // Getters and Setters
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }

@@ -165,6 +165,73 @@ public class User {
         this.isActive = true;
     }
 
+    /**
+     * Updates the approval limit for this user.
+     * 
+     * @param newLimitCents New approval limit in cents
+     */
+    public void updateApprovalLimit(long newLimitCents) {
+        if (newLimitCents < 0) {
+            throw new IllegalArgumentException("Approval limit cannot be negative");
+        }
+        this.approvalLimitCents = newLimitCents;
+    }
+
+    /**
+     * @return true if user has any administrative roles
+     */
+    public boolean isAdministrator() {
+        return hasRole("ROLE_ADMIN") || hasRole("ROLE_TREASURY_MANAGER");
+    }
+
+    /**
+     * @return true if user has read-only access (auditor)
+     */
+    public boolean isReadOnly() {
+        return hasRole("ROLE_AUDITOR") && getRolesList().size() == 1;
+    }
+
+    /**
+     * @return formatted approval limit for display
+     */
+    public String getFormattedApprovalLimit() {
+        if (approvalLimitCents == null || approvalLimitCents == 0) {
+            return "No limit";
+        }
+        return String.format("$%,.2f", approvalLimitCents / 100.0);
+    }
+
+    /**
+     * Checks if user can perform operations on payments.
+     * 
+     * @return true if user can perform payment operations
+     */
+    public boolean canPerformPaymentOperations() {
+        return isActive && (hasRole("ROLE_TREASURY_OPS") || 
+                           hasRole("ROLE_TREASURY_MANAGER") || 
+                           hasRole("ROLE_CLEARING"));
+    }
+
+    /**
+     * Gets a display name for the user (full name or username).
+     * 
+     * @return Display name
+     */
+    public String getDisplayName() {
+        return fullName != null && !fullName.trim().isEmpty() ? fullName : username;
+    }
+
+    /**
+     * Validates that the user account is in a valid state.
+     * 
+     * @return true if user account is valid
+     */
+    public boolean isValid() {
+        return username != null && !username.trim().isEmpty() &&
+               email != null && !email.trim().isEmpty() &&
+               fullName != null && !fullName.trim().isEmpty();
+    }
+
     // Getters and Setters
     public UUID getId() { return id; }
     public void setId(UUID id) { this.id = id; }
