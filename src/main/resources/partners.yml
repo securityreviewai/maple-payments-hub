@@ -1,0 +1,323 @@
+# Partner bank configuration for Maple Payments Hub
+# Defines routing preferences, message formats, and signing requirements per partner
+
+partners:
+  # JPMorgan Chase - Tier 1 Bank
+  JPMC:
+    bank-name: "JPMorgan Chase Bank"
+    bic-code: "CHASUS33"
+    fedwire-routing: "021000021"
+    chips-routing: "CH210002"
+    chips-participant-code: "CHASNYXX"
+    
+    # Message format preferences
+    preferred-formats:
+      - CHIPS
+      - FEDWIRE
+      - ISO20022
+    
+    # Security requirements
+    message-signing:
+      required: true
+      algorithm: "SHA256withRSA"
+      certificate: "JPMC-PROD-2024"
+      key-rotation-days: 365
+    
+    # Transaction limits
+    limits:
+      max-single-transaction: 1000000000  # $10M
+      daily-limit: 10000000000  # $100M
+      currency-restrictions: []  # No restrictions
+    
+    # Cut-off times (EST)
+    cutoff-times:
+      fedwire: "18:00"
+      chips: "16:30"
+      same-day-ach: "14:45"
+    
+    # Settlement accounts
+    settlement:
+      usd-account: "USD-JPMC-001"
+      correspondent-account: "021000021-MAIN"
+      collateral-account: "021000021-COLL"
+    
+    # Special processing flags
+    processing:
+      supports-rtgs: true
+      requires-chips-format: true
+      supports-iso20022: true
+      requires-dva: true  # Delivery vs. Payment
+      ofac-screening: "enhanced"
+
+  # Bank of America
+  BOFA:
+    bank-name: "Bank of America N.A."
+    bic-code: "BOFAUS3N"
+    fedwire-routing: "026009593"
+    chips-routing: "CH260095"
+    chips-participant-code: "BOFANYXX"
+    
+    preferred-formats:
+      - FEDWIRE
+      - ISO20022
+      - NACHA
+    
+    message-signing:
+      required: true
+      algorithm: "SHA256withRSA"
+      certificate: "BOFA-PROD-2024"
+      key-rotation-days: 180
+    
+    limits:
+      max-single-transaction: 500000000  # $5M
+      daily-limit: 5000000000  # $50M
+      currency-restrictions: ["USD", "EUR", "GBP"]
+    
+    cutoff-times:
+      fedwire: "17:30"
+      chips: "16:00"
+      same-day-ach: "14:30"
+    
+    settlement:
+      usd-account: "USD-BOFA-001"
+      correspondent-account: "026009593-MAIN"
+    
+    processing:
+      supports-rtgs: true
+      requires-chips-format: false
+      supports-iso20022: true
+      requires-dva: false
+      ofac-screening: "standard"
+
+  # Wells Fargo
+  WFARGO:
+    bank-name: "Wells Fargo Bank N.A."
+    bic-code: "WFBIUS6S"
+    fedwire-routing: "121000248"
+    chips-routing: "CH121000"
+    chips-participant-code: "WFBINYXX"
+    
+    preferred-formats:
+      - FEDWIRE
+      - NACHA
+    
+    message-signing:
+      required: false  # Lower security tier
+      algorithm: "SHA256withRSA"
+      certificate: "WFARGO-PROD-2024"
+      key-rotation-days: 365
+    
+    limits:
+      max-single-transaction: 250000000  # $2.5M
+      daily-limit: 2500000000  # $25M
+      currency-restrictions: ["USD"]
+    
+    cutoff-times:
+      fedwire: "17:00"
+      same-day-ach: "14:15"
+    
+    settlement:
+      usd-account: "USD-WFARGO-001"
+      correspondent-account: "121000248-MAIN"
+    
+    processing:
+      supports-rtgs: true
+      requires-chips-format: false
+      supports-iso20022: false
+      requires-dva: false
+      ofac-screening: "standard"
+
+  # Citibank
+  CITI:
+    bank-name: "Citibank N.A."
+    bic-code: "CITIUS33"
+    fedwire-routing: "021000089"
+    chips-routing: "CH210000"
+    chips-participant-code: "CITINYXX"
+    
+    preferred-formats:
+      - CHIPS
+      - SWIFT
+      - ISO20022
+    
+    message-signing:
+      required: true
+      algorithm: "SHA256withRSA"
+      certificate: "CITI-PROD-2024"
+      key-rotation-days: 180
+    
+    limits:
+      max-single-transaction: 2000000000  # $20M
+      daily-limit: 20000000000  # $200M
+      currency-restrictions: []  # Global bank - no restrictions
+    
+    cutoff-times:
+      fedwire: "18:15"
+      chips: "16:45"
+      swift: "17:00"
+      same-day-ach: "15:00"
+    
+    settlement:
+      usd-account: "USD-CITI-001"
+      eur-account: "EUR-CITI-001"
+      correspondent-account: "021000089-MAIN"
+      nostro-accounts:
+        - currency: "EUR"
+          account: "CITI-EUR-NOSTRO"
+          correspondent: "CITIDEFF"
+        - currency: "GBP"
+          account: "CITI-GBP-NOSTRO"
+          correspondent: "CITIGB2L"
+    
+    processing:
+      supports-rtgs: true
+      requires-chips-format: true
+      supports-iso20022: true
+      requires-dva: true
+      ofac-screening: "enhanced"
+      supports-multicurrency: true
+
+  # Regional Bank Example
+  REGIONS:
+    bank-name: "Regions Bank"
+    bic-code: "REGNUS44"
+    fedwire-routing: "062000019"
+    
+    preferred-formats:
+      - FEDWIRE
+      - NACHA
+    
+    message-signing:
+      required: false
+      algorithm: "SHA1withRSA"  # Legacy system
+      certificate: "REGIONS-PROD-2024"
+      key-rotation-days: 545
+    
+    limits:
+      max-single-transaction: 100000000  # $1M
+      daily-limit: 1000000000  # $10M
+      currency-restrictions: ["USD"]
+    
+    cutoff-times:
+      fedwire: "16:30"
+      same-day-ach: "14:00"
+    
+    settlement:
+      usd-account: "USD-REGIONS-001"
+      correspondent-account: "062000019-MAIN"
+    
+    processing:
+      supports-rtgs: false  # Uses correspondent
+      requires-chips-format: false
+      supports-iso20022: false
+      requires-dva: false
+      ofac-screening: "basic"
+
+  # Credit Union Example
+  NAVY_FCU:
+    bank-name: "Navy Federal Credit Union"
+    fedwire-routing: "256074974"
+    
+    preferred-formats:
+      - NACHA
+    
+    message-signing:
+      required: false
+      
+    limits:
+      max-single-transaction: 50000000  # $500K
+      daily-limit: 500000000  # $5M
+      currency-restrictions: ["USD"]
+    
+    cutoff-times:
+      same-day-ach: "13:45"
+      next-day-ach: "17:00"
+    
+    settlement:
+      usd-account: "USD-NAVYFCU-001"
+      correspondent-account: "256074974-MAIN"
+      correspondent-bank: "JPMC"  # Uses JPMC as correspondent
+    
+    processing:
+      supports-rtgs: false
+      requires-chips-format: false
+      supports-iso20022: false
+      requires-dva: false
+      ofac-screening: "standard"
+      uses-correspondent: true
+
+# Default configuration for unknown partners
+default-partner:
+  preferred-formats:
+    - FEDWIRE
+  
+  message-signing:
+    required: false
+    algorithm: "SHA256withRSA"
+    key-rotation-days: 365
+  
+  limits:
+    max-single-transaction: 100000000  # $1M
+    daily-limit: 1000000000  # $10M
+    currency-restrictions: ["USD"]
+  
+  cutoff-times:
+    fedwire: "15:00"  # Conservative cutoff
+    same-day-ach: "13:00"
+  
+  processing:
+    supports-rtgs: false
+    requires-chips-format: false
+    supports-iso20022: false
+    requires-dva: false
+    ofac-screening: "enhanced"  # Default to high security
+
+# Network-specific configurations
+networks:
+  fedwire:
+    operating-hours:
+      start: "21:00"  # 9 PM ET previous day
+      end: "18:30"    # 6:30 PM ET
+      timezone: "America/New_York"
+    
+    holidays:
+      - "2024-01-01"  # New Year's Day
+      - "2024-01-15"  # MLK Day
+      - "2024-02-19"  # Presidents Day
+      - "2024-05-27"  # Memorial Day
+      - "2024-07-04"  # Independence Day
+      - "2024-09-02"  # Labor Day
+      - "2024-10-14"  # Columbus Day
+      - "2024-11-11"  # Veterans Day
+      - "2024-11-28"  # Thanksgiving
+      - "2024-12-25"  # Christmas
+  
+  chips:
+    operating-hours:
+      start: "09:00"
+      end: "16:30"
+      timezone: "America/New_York"
+    
+    settlement-windows:
+      - time: "09:00"
+        description: "Opening settlement"
+      - time: "12:00"
+        description: "Midday settlement"
+      - time: "15:00"
+        description: "Afternoon settlement"
+      - time: "16:30"
+        description: "Final settlement"
+  
+  nacha:
+    operating-days: ["monday", "tuesday", "wednesday", "thursday", "friday"]
+    cutoff-times:
+      same-day: "14:45"
+      next-day: "23:59"
+    
+    return-windows:
+      - type: "administrative"
+        days: 2
+        description: "Account not found, invalid account"
+      - type: "customer"
+        days: 60
+        description: "Customer dispute, unauthorized"
