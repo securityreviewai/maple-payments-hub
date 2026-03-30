@@ -7,6 +7,7 @@ import com.maple.model.PaymentStatus;
 import com.maple.model.User;
 import com.maple.repository.PaymentRepository;
 import com.maple.repository.UserRepository;
+import com.maple.service.approval.ApprovalRulesEngineService;
 import com.maple.service.audit.AuditService;
 import com.maple.event.PaymentEvents;
 import org.slf4j.Logger;
@@ -44,15 +45,25 @@ public class PaymentSubmissionService {
     @Value("${maple.payment.max-daily-limit-cents:1000000000}")
     private long maxDailyLimitCents;
 
+    @Value("${maple.approval.default-holiday-calendar-id}")
+    private String defaultHolidayCalendarId;
+
+    @Value("${maple.approval.stuck-approval-hours:24}")
+    private int stuckApprovalHours;
+
+    private final ApprovalRulesEngineService approvalRulesEngineService;
+
     @Autowired
     public PaymentSubmissionService(PaymentRepository paymentRepository,
                                   UserRepository userRepository,
                                   AuditService auditService,
-                                  KafkaTemplate<String, Object> kafkaTemplate) {
+                                  KafkaTemplate<String, Object> kafkaTemplate,
+                                  ApprovalRulesEngineService approvalRulesEngineService) {
         this.paymentRepository = paymentRepository;
         this.userRepository = userRepository;
         this.auditService = auditService;
         this.kafkaTemplate = kafkaTemplate;
+        this.approvalRulesEngineService = approvalRulesEngineService;
     }
 
     /**
@@ -93,6 +104,19 @@ public class PaymentSubmissionService {
         // Determine if approval is required
         boolean requiresApproval = determineApprovalRequirement(request, initiator);
         payment.evaluateApprovalRequirement(requiresApproval, approvalThresholdCents);
+        if (Boolean.TRUE.equals(payment.getApprovalRequired())) {
+            int tierApprovers = approvalRulesEngineService.resolveRequiredApprovers(
+                    payment.getAmountCents(), payment.getCurrency());
+            payment.setRequiredApprovers(Math.max(1, Math.min(2, tierApprovers)));
+            if (defaultHolidayCalendarId != null && !defaultHolidayCalendarId.isBlank()) {
+                try {
+                    payment.setHolidayCalendarId(UUID.fromString(defaultHolidayCalendarId.trim()));
+                } catch (IllegalArgumentException e) {
+                    logger.warn("Invalid maple.approval.default-holiday-calendar-id, skipping calendar binding");
+                }
+            }
+            payment.setEscalationDueAt(OffsetDateTime.now().plusHours(stuckApprovalHours));
+        }
 
         // Save payment
         Payment savedPayment = paymentRepository.save(payment);
@@ -216,6 +240,11 @@ public class PaymentSubmissionService {
                 .initiatedBy(payment.getInitiatedBy())
                 .approvedBy(payment.getApprovedBy())
                 .approvalRequired(payment.getApprovalRequired())
+                .requiredApprovers(payment.getRequiredApprovers())
+                .firstApprovalBy(payment.getFirstApprovalBy())
+                .firstApprovalAt(payment.getFirstApprovalAt())
+                .escalationDueAt(payment.getEscalationDueAt())
+                .escalationLevel(payment.getEscalationLevel())
                 .submittedAt(payment.getSubmittedAt())
                 .settledAt(payment.getSettledAt())
                 .createdAt(payment.getCreatedAt())

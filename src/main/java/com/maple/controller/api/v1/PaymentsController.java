@@ -1,10 +1,14 @@
 package com.maple.controller.api.v1;
 
+import com.maple.dto.PaymentAnalyticsDto;
 import com.maple.dto.PaymentRequestDto;
 import com.maple.dto.PaymentResponseDto;
+import com.maple.model.PaymentStatus;
+import com.maple.model.Payment;
 import com.maple.service.payment.PaymentService;
 import com.maple.service.payment.PaymentStatisticsService;
 import com.maple.service.payment.PaymentSubmissionService;
+import com.maple.service.sftp.PaymentBatchDeliveryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -47,14 +51,17 @@ public class PaymentsController {
     private final PaymentSubmissionService paymentSubmissionService;
     private final PaymentService paymentService;
     private final PaymentStatisticsService paymentStatisticsService;
+    private final PaymentBatchDeliveryService paymentBatchDeliveryService;
 
     @Autowired
     public PaymentsController(PaymentSubmissionService paymentSubmissionService,
                              PaymentService paymentService,
-                             PaymentStatisticsService paymentStatisticsService) {
+                             PaymentStatisticsService paymentStatisticsService,
+                             PaymentBatchDeliveryService paymentBatchDeliveryService) {
         this.paymentSubmissionService = paymentSubmissionService;
         this.paymentService = paymentService;
         this.paymentStatisticsService = paymentStatisticsService;
+        this.paymentBatchDeliveryService = paymentBatchDeliveryService;
     }
 
     @PostMapping
@@ -344,12 +351,19 @@ public class PaymentsController {
 
         logger.info("Clearing submission request for: {} by user: {}", id, authentication.getName());
 
-        // TODO: Implement clearing submission logic
-        // Generate ISO20022 message
-        // Submit via SFTP
-        // Update payment status
-        
-        return ResponseEntity.ok().build();
+        String operationId = idempotencyKey != null ? idempotencyKey : UUID.randomUUID().toString();
+        UUID actorId = UUID.fromString(authentication.getName());
+        try {
+            Payment updated = paymentBatchDeliveryService.submitSinglePaymentToClearing(id, actorId);
+            PaymentResponseDto body = paymentService.convertToResponseDto(updated, operationId);
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(body);
+        } catch (IllegalArgumentException e) {
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new PaymentValidationException(e.getMessage());
+        }
     }
 
     @PostMapping("/batch/approve")
@@ -479,6 +493,52 @@ public class PaymentsController {
             logger.error("Error retrieving payment history: {}", id, e);
             throw new PaymentProcessingException("Failed to retrieve payment history", e);
         }
+    }
+
+    @GetMapping("/analytics")
+    @Operation(
+        summary = "Get payment analytics",
+        description = "Retrieves aggregated payment analytics for dashboards and reporting. " +
+                     "Returns total count, volume, success rate, and status breakdown.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Analytics retrieved"),
+            @ApiResponse(responseCode = "400", description = "Invalid date range")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_audit:read') or hasAuthority('ROLE_AUDITOR') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<PaymentAnalyticsDto> getPaymentAnalytics(
+            @Parameter(description = "Start date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime startDate,
+            @Parameter(description = "End date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime endDate,
+            Authentication authentication) {
+
+        logger.debug("Retrieving payment analytics by user: {}", authentication.getName());
+
+        OffsetDateTime start = startDate != null ? startDate : OffsetDateTime.now().minusDays(30);
+        OffsetDateTime end = endDate != null ? endDate : OffsetDateTime.now();
+
+        if (!start.isBefore(end) && !start.isEqual(end)) {
+            throw new PaymentValidationException("Start date must be before or equal to end date");
+        }
+        if (java.time.Duration.between(start, end).toDays() > 365) {
+            throw new PaymentValidationException("Date range cannot exceed 365 days");
+        }
+
+        Map<PaymentStatus, Long> statusBreakdown = paymentStatisticsService.getStatusBreakdown(start, end);
+        long totalCount = statusBreakdown.values().stream().mapToLong(Long::longValue).sum();
+
+        PaymentAnalyticsDto analytics = PaymentAnalyticsDto.builder()
+                .periodStart(start)
+                .periodEnd(end)
+                .totalCount(totalCount)
+                .totalVolumeCents(paymentStatisticsService.calculateTotalVolume(start, end))
+                .averageAmountCents(paymentStatisticsService.calculateAveragePaymentAmount(start, end))
+                .successRatePercent(paymentStatisticsService.calculateSuccessRate(start, end))
+                .statusBreakdown(statusBreakdown)
+                .build();
+
+        return ResponseEntity.ok(analytics);
     }
 
     @GetMapping("/statistics")

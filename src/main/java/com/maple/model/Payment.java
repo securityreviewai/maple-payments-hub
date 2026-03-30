@@ -82,6 +82,27 @@ public class Payment {
     @Column(name = "approval_required", nullable = false)
     private Boolean approvalRequired = false;
 
+    @Column(name = "required_approvers", nullable = false)
+    private Integer requiredApprovers = 1;
+
+    @Column(name = "first_approval_by")
+    private UUID firstApprovalBy;
+
+    @Column(name = "first_approval_at")
+    private OffsetDateTime firstApprovalAt;
+
+    @Column(name = "holiday_calendar_id")
+    private UUID holidayCalendarId;
+
+    @Column(name = "escalation_due_at")
+    private OffsetDateTime escalationDueAt;
+
+    @Column(name = "last_escalation_at")
+    private OffsetDateTime lastEscalationAt;
+
+    @Column(name = "escalation_level", nullable = false)
+    private Integer escalationLevel = 0;
+
     @Column(name = "submitted_at")
     private OffsetDateTime submittedAt;
 
@@ -135,17 +156,37 @@ public class Payment {
     }
 
     /**
-     * Approves the payment by the specified approver.
+     * Records an approval step (single control or first/second step of dual control).
+     *
+     * @return true when the payment is fully approved ({@link PaymentStatus#APPROVED}); false when a second approver is still required
      */
-    public void approve(UUID approverId) {
-        if (!this.approvalRequired) {
+    public boolean recordApproval(UUID approverId) {
+        if (!Boolean.TRUE.equals(this.approvalRequired)) {
             throw new IllegalStateException("Payment does not require approval");
         }
         if (this.status != PaymentStatus.PENDING_APPROVAL) {
             throw new IllegalStateException("Payment is not in pending approval status");
         }
+        if (approverId.equals(this.initiatedBy)) {
+            throw new IllegalStateException("Initiator cannot approve their own payment (maker-checker)");
+        }
+        int required = this.requiredApprovers != null ? this.requiredApprovers : 1;
+        if (required <= 1) {
+            this.approvedBy = approverId;
+            this.status = PaymentStatus.APPROVED;
+            return true;
+        }
+        if (this.firstApprovalBy == null) {
+            this.firstApprovalBy = approverId;
+            this.firstApprovalAt = OffsetDateTime.now();
+            return false;
+        }
+        if (approverId.equals(this.firstApprovalBy)) {
+            throw new IllegalStateException("Dual control requires two distinct approvers");
+        }
         this.approvedBy = approverId;
         this.status = PaymentStatus.APPROVED;
+        return true;
     }
 
     /**
@@ -155,6 +196,8 @@ public class Payment {
         if (this.status != PaymentStatus.PENDING_APPROVAL) {
             throw new IllegalStateException("Payment is not in pending approval status");
         }
+        this.firstApprovalBy = null;
+        this.firstApprovalAt = null;
         this.status = PaymentStatus.REJECTED;
     }
 
@@ -200,6 +243,10 @@ public class Payment {
         if (!this.status.canBeCancelled()) {
             throw new IllegalStateException("Payment cannot be cancelled in current status: " + this.status);
         }
+        if (this.status == PaymentStatus.PENDING_APPROVAL) {
+            this.firstApprovalBy = null;
+            this.firstApprovalAt = null;
+        }
         this.status = PaymentStatus.CANCELLED;
     }
 
@@ -239,6 +286,27 @@ public class Payment {
 
     public Boolean getApprovalRequired() { return approvalRequired; }
     public void setApprovalRequired(Boolean approvalRequired) { this.approvalRequired = approvalRequired; }
+
+    public Integer getRequiredApprovers() { return requiredApprovers; }
+    public void setRequiredApprovers(Integer requiredApprovers) { this.requiredApprovers = requiredApprovers; }
+
+    public UUID getFirstApprovalBy() { return firstApprovalBy; }
+    public void setFirstApprovalBy(UUID firstApprovalBy) { this.firstApprovalBy = firstApprovalBy; }
+
+    public OffsetDateTime getFirstApprovalAt() { return firstApprovalAt; }
+    public void setFirstApprovalAt(OffsetDateTime firstApprovalAt) { this.firstApprovalAt = firstApprovalAt; }
+
+    public UUID getHolidayCalendarId() { return holidayCalendarId; }
+    public void setHolidayCalendarId(UUID holidayCalendarId) { this.holidayCalendarId = holidayCalendarId; }
+
+    public OffsetDateTime getEscalationDueAt() { return escalationDueAt; }
+    public void setEscalationDueAt(OffsetDateTime escalationDueAt) { this.escalationDueAt = escalationDueAt; }
+
+    public OffsetDateTime getLastEscalationAt() { return lastEscalationAt; }
+    public void setLastEscalationAt(OffsetDateTime lastEscalationAt) { this.lastEscalationAt = lastEscalationAt; }
+
+    public Integer getEscalationLevel() { return escalationLevel; }
+    public void setEscalationLevel(Integer escalationLevel) { this.escalationLevel = escalationLevel; }
 
     public OffsetDateTime getSubmittedAt() { return submittedAt; }
     public void setSubmittedAt(OffsetDateTime submittedAt) { this.submittedAt = submittedAt; }

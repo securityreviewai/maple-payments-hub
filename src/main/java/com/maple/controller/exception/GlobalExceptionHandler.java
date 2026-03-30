@@ -1,5 +1,6 @@
 package com.maple.controller.exception;
 
+import com.maple.service.approval.ApprovalRulesViolationException;
 import com.maple.service.payment.PaymentService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -88,6 +89,25 @@ public class GlobalExceptionHandler {
                 .build();
 
         logger.warn("Payment state error: {}", ex.getMessage());
+        return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * Handles approval rule violations (e.g. holiday calendar blocking approval).
+     */
+    @ExceptionHandler(ApprovalRulesViolationException.class)
+    public ResponseEntity<ErrorResponse> handleApprovalRulesViolation(
+            ApprovalRulesViolationException ex, WebRequest request) {
+
+        ErrorResponse errorResponse = ErrorResponse.builder()
+                .timestamp(OffsetDateTime.now())
+                .status(HttpStatus.BAD_REQUEST.value())
+                .error("Approval Rules Violation")
+                .message(ex.getMessage())
+                .path(request.getDescription(false).replace("uri=", ""))
+                .build();
+
+        logger.warn("Approval rules violation: {}", ex.getMessage());
         return new ResponseEntity<>(errorResponse, HttpStatus.BAD_REQUEST);
     }
 

@@ -1,0 +1,508 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Payment Search | Maple Payments Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --nav-bg: rgba(15, 23, 42, 0.92);
+      --nav-border: rgba(148, 163, 184, 0.12);
+      --accent: #0d9488;
+      --accent-hover: #14b8a6;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --panel-bg: rgba(30, 41, 59, 0.6);
+      --input-bg: rgba(15, 23, 42, 0.8);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Outfit', system-ui, sans-serif;
+      background: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+      min-height: 100vh;
+      color: var(--text);
+    }
+    .nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 2rem;
+      background: var(--nav-bg);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--nav-border);
+    }
+    .nav__brand {
+      font-size: 1.25rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .nav__brand span { color: var(--accent); }
+    .nav__links { display: flex; gap: 1.5rem; }
+    .nav__links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9375rem;
+      transition: color 0.2s;
+    }
+    .nav__links a:hover { color: var(--accent); }
+    main {
+      padding: 6rem 2rem 4rem;
+      max-width: 64rem;
+      margin: 0 auto;
+    }
+    h1 {
+      font-size: 1.75rem;
+      margin-bottom: 0.5rem;
+    }
+    .subtitle {
+      color: var(--text-muted);
+      font-size: 0.9375rem;
+      margin-bottom: 2rem;
+    }
+    .auth-banner {
+      background: var(--panel-bg);
+      border: 1px solid var(--nav-border);
+      border-radius: 8px;
+      padding: 1rem 1.25rem;
+      margin-bottom: 2rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      flex-wrap: wrap;
+    }
+    .auth-banner input {
+      flex: 1;
+      min-width: 200px;
+      padding: 0.5rem 0.75rem;
+      background: var(--input-bg);
+      border: 1px solid var(--nav-border);
+      border-radius: 6px;
+      color: var(--text);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.8125rem;
+    }
+    .auth-banner input::placeholder { color: var(--text-muted); opacity: 0.7; }
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 300px;
+      gap: 2rem;
+    }
+    @media (max-width: 900px) {
+      .grid { grid-template-columns: 1fr; }
+    }
+    .panel {
+      background: var(--panel-bg);
+      border: 1px solid var(--nav-border);
+      border-radius: 10px;
+      padding: 1.5rem;
+    }
+    .panel h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--accent);
+    }
+    .filters {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 1rem;
+    }
+    .filters label {
+      display: block;
+      font-size: 0.8125rem;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+    }
+    .filters input, .filters select {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      background: var(--input-bg);
+      border: 1px solid var(--nav-border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 0.875rem;
+    }
+    .filters input::placeholder { color: var(--text-muted); }
+    .actions {
+      display: flex;
+      gap: 0.75rem;
+      margin-top: 1.25rem;
+      flex-wrap: wrap;
+    }
+    .btn {
+      padding: 0.5rem 1rem;
+      border-radius: 6px;
+      font-weight: 600;
+      font-size: 0.875rem;
+      cursor: pointer;
+      border: none;
+      font-family: inherit;
+      transition: background 0.2s;
+    }
+    .btn--primary {
+      background: var(--accent);
+      color: white;
+    }
+    .btn--primary:hover { background: var(--accent-hover); }
+    .btn--secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--nav-border);
+    }
+    .btn--secondary:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .btn--danger { background: rgba(239, 68, 68, 0.2); color: #fca5a5; }
+    .btn--danger:hover { background: rgba(239, 68, 68, 0.35); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+    .saved-list {
+      list-style: none;
+    }
+    .saved-list li {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 0.75rem;
+      border-radius: 6px;
+      margin-bottom: 0.5rem;
+      background: var(--input-bg);
+      border: 1px solid transparent;
+    }
+    .saved-list li:hover { border-color: var(--nav-border); }
+    .saved-list .name { font-weight: 500; }
+    .saved-list .meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 0.125rem;
+    }
+    .saved-list .actions { margin-top: 0; }
+    .saved-list .actions .btn { padding: 0.35rem 0.65rem; font-size: 0.8125rem; }
+    .save-form {
+      margin-top: 1rem;
+      padding-top: 1rem;
+      border-top: 1px solid var(--nav-border);
+    }
+    .save-form input {
+      width: 100%;
+      padding: 0.5rem 0.75rem;
+      background: var(--input-bg);
+      border: 1px solid var(--nav-border);
+      border-radius: 6px;
+      color: var(--text);
+      margin-bottom: 0.5rem;
+    }
+    .results {
+      margin-top: 2rem;
+      min-height: 4rem;
+    }
+    .results table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.875rem;
+    }
+    .results th, .results td {
+      padding: 0.75rem 1rem;
+      text-align: left;
+      border-bottom: 1px solid var(--nav-border);
+    }
+    .results th {
+      color: var(--text-muted);
+      font-weight: 500;
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    .results tr:hover td { background: rgba(13, 148, 136, 0.08); }
+    .msg {
+      padding: 1rem;
+      border-radius: 6px;
+      margin-bottom: 1rem;
+      font-size: 0.9375rem;
+    }
+    .msg--info { background: rgba(13, 148, 136, 0.15); color: var(--accent); }
+    .msg--error { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="/" class="nav__brand">Maple<span>Payments</span> Hub</a>
+    <div class="nav__links">
+      <a href="/">Home</a>
+      <a href="/static/dashboard.html">Dashboard</a>
+      <a href="/api/docs">API Docs</a>
+      <a href="/static/search.html" class="active">Payment Search</a>
+      <a href="/static/batches.html">SFTP Batches</a>
+    </div>
+  </nav>
+
+  <main>
+    <h1>Payment Search</h1>
+    <p class="subtitle">Search payments with filters. Save favorite filter sets and recall them with one click.</p>
+
+    <div class="auth-banner">
+      <span style="color: var(--text-muted); font-size: 0.875rem;">Bearer Token (for API calls):</span>
+      <input type="password" id="tokenInput" placeholder="Paste JWT from Swagger / Authorize or auth flow">
+      <button class="btn btn--secondary" id="saveTokenBtn">Use token</button>
+    </div>
+
+    <div class="grid">
+      <div>
+        <div class="panel">
+          <h2>Search filters</h2>
+          <form id="searchForm" class="filters">
+            <div>
+              <label>Payment reference</label>
+              <input type="text" name="paymentReference" placeholder="Partial match">
+            </div>
+            <div>
+              <label>Debtor account</label>
+              <input type="text" name="debtorAccount" placeholder="Partial match">
+            </div>
+            <div>
+              <label>Creditor account</label>
+              <input type="text" name="creditorAccount" placeholder="Partial match">
+            </div>
+            <div>
+              <label>Status</label>
+              <select name="status">
+                <option value="">Any</option>
+                <option value="CREATED">CREATED</option>
+                <option value="PENDING_APPROVAL">PENDING_APPROVAL</option>
+                <option value="APPROVED">APPROVED</option>
+                <option value="REJECTED">REJECTED</option>
+                <option value="SUBMITTED">SUBMITTED</option>
+                <option value="SETTLED">SETTLED</option>
+                <option value="FAILED">FAILED</option>
+                <option value="CANCELLED">CANCELLED</option>
+              </select>
+            </div>
+            <div>
+              <label>Start date (ISO)</label>
+              <input type="text" name="startDate" placeholder="2025-01-01T00:00:00Z">
+            </div>
+            <div>
+              <label>End date (ISO)</label>
+              <input type="text" name="endDate" placeholder="2025-12-31T23:59:59Z">
+            </div>
+            <div>
+              <label>Min amount (cents)</label>
+              <input type="number" name="minAmountCents" placeholder="0">
+            </div>
+            <div>
+              <label>Max amount (cents)</label>
+              <input type="number" name="maxAmountCents" placeholder="">
+            </div>
+            <div>
+              <label>Currency</label>
+              <input type="text" name="currency" placeholder="USD">
+            </div>
+            <div>
+              <label>Page</label>
+              <input type="number" name="page" value="0" min="0">
+            </div>
+            <div>
+              <label>Size</label>
+              <input type="number" name="size" value="20" min="1" max="100">
+            </div>
+          </form>
+          <div class="actions">
+            <button class="btn btn--primary" id="searchBtn">Search</button>
+            <button class="btn btn--secondary" id="saveFilterBtn">Save as filter</button>
+          </div>
+        </div>
+
+        <div id="msg"></div>
+        <div class="results" id="results"></div>
+      </div>
+
+      <div class="panel">
+        <h2>Saved filters</h2>
+        <ul class="saved-list" id="savedList"></ul>
+        <div class="save-form">
+          <input type="text" id="filterNameInput" placeholder="Filter name (e.g. My pending)">
+          <button class="btn btn--secondary" id="saveFilterSubmit" style="width:100%">Save current filters</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const API_BASE = (window.location.origin || '') + '/api/v1';
+    const TOKEN_KEY = 'maple_token';
+
+    function getToken() {
+      return sessionStorage.getItem(TOKEN_KEY) || document.getElementById('tokenInput').value || '';
+    }
+
+    function headers() {
+      const t = getToken();
+      const h = { 'Content-Type': 'application/json' };
+      if (t) h['Authorization'] = 'Bearer ' + t;
+      return h;
+    }
+
+    document.getElementById('saveTokenBtn').addEventListener('click', () => {
+      const v = document.getElementById('tokenInput').value.trim();
+      if (v) {
+        sessionStorage.setItem(TOKEN_KEY, v);
+        showMsg('Token saved for this session.', 'info');
+      }
+    });
+
+    function collectParams() {
+      const form = document.getElementById('searchForm');
+      const params = {};
+      for (const el of form.elements) {
+        if (!el.name) continue;
+        const v = (el.value || '').toString().trim();
+        if (v === '') continue;
+        params[el.name] = el.type === 'number' ? (parseInt(v, 10) || 0) : v;
+      }
+      return params;
+    }
+
+    function buildQueryString(params) {
+      return new URLSearchParams(params).toString();
+    }
+
+    function applyParams(params) {
+      const form = document.getElementById('searchForm');
+      for (const [k, v] of Object.entries(params || {})) {
+        const el = form.elements[k];
+        if (el) el.value = v != null ? v : '';
+      }
+    }
+
+    function showMsg(text, type) {
+      const el = document.getElementById('msg');
+      el.textContent = text;
+      el.className = 'msg msg--' + (type || 'info');
+      el.style.display = text ? 'block' : 'none';
+    }
+
+    async function search() {
+      const params = collectParams();
+      const qs = buildQueryString(params);
+      showMsg('');
+      try {
+        const r = await fetch(API_BASE + '/payments/search?' + qs, { headers: headers(), credentials: 'include' });
+        if (!r.ok) throw new Error(await r.text());
+        const data = await r.json();
+        renderResults(data);
+      } catch (e) {
+        showMsg('Search failed: ' + e.message, 'error');
+        document.getElementById('results').innerHTML = '';
+      }
+    }
+
+    function renderResults(data) {
+      const content = data.content || [];
+      const total = data.totalElements ?? 0;
+      const el = document.getElementById('results');
+      if (content.length === 0) {
+        el.innerHTML = '<p style="color:var(--text-muted)">No payments found.</p>';
+        return;
+      }
+      let html = '<table><thead><tr>';
+      ['Reference', 'Status', 'Amount', 'Currency', 'Debtor', 'Creditor'].forEach(h => { html += '<th>' + h + '</th>'; });
+      html += '</tr></thead><tbody>';
+      content.forEach(p => {
+        html += '<tr>';
+        html += '<td>' + (p.paymentReference || '-') + '</td>';
+        html += '<td>' + (p.status || '-') + '</td>';
+        html += '<td>' + (p.amountCents != null ? (p.amountCents / 100).toFixed(2) : '-') + '</td>';
+        html += '<td>' + (p.currency || '-') + '</td>';
+        html += '<td>' + (p.debtorAccount || '-') + '</td>';
+        html += '<td>' + (p.creditorAccount || '-') + '</td>';
+        html += '</tr>';
+      });
+      html += '</tbody></table>';
+      html += '<p style="color:var(--text-muted);font-size:0.875rem;margin-top:0.5rem">Total: ' + total + ' payments</p>';
+      el.innerHTML = html;
+    }
+
+    async function loadSavedFilters() {
+      const ul = document.getElementById('savedList');
+      ul.innerHTML = '';
+      try {
+        const r = await fetch(API_BASE + '/payments/search-filters', { headers: headers(), credentials: 'include' });
+        if (!r.ok) return;
+        const list = await r.json();
+        list.forEach(f => {
+          const li = document.createElement('li');
+          li.innerHTML = '<div><span class="name">' + escapeHtml(f.name) + '</span><div class="meta">' + Object.keys(f.queryParams || {}).length + ' params</div></div>';
+          const acts = document.createElement('div');
+          acts.className = 'actions';
+          const applyBtn = document.createElement('button');
+          applyBtn.className = 'btn btn--secondary';
+          applyBtn.textContent = 'Apply';
+          applyBtn.onclick = () => { applyParams(f.queryParams); search(); };
+          const delBtn = document.createElement('button');
+          delBtn.className = 'btn btn--danger';
+          delBtn.textContent = 'Delete';
+          delBtn.onclick = () => deleteFilter(f.id);
+          acts.append(applyBtn, delBtn);
+          li.appendChild(acts);
+          ul.appendChild(li);
+        });
+      } catch (_) {}
+    }
+
+    function escapeHtml(s) {
+      const div = document.createElement('div');
+      div.textContent = s;
+      return div.innerHTML;
+    }
+
+    async function deleteFilter(id) {
+      try {
+        const r = await fetch(API_BASE + '/payments/search-filters/' + id, {
+          method: 'DELETE',
+          headers: headers(),
+          credentials: 'include'
+        });
+        if (r.ok) { loadSavedFilters(); showMsg('Filter deleted.', 'info'); }
+        else throw new Error(await r.text());
+      } catch (e) { showMsg('Delete failed: ' + e.message, 'error'); }
+    }
+
+    document.getElementById('searchBtn').addEventListener('click', search);
+    document.getElementById('searchForm').addEventListener('submit', e => { e.preventDefault(); search(); });
+
+    document.getElementById('saveFilterBtn').addEventListener('click', () => {
+      document.getElementById('filterNameInput').focus();
+    });
+
+    document.getElementById('saveFilterSubmit').addEventListener('click', async () => {
+      const name = document.getElementById('filterNameInput').value.trim();
+      if (!name) { showMsg('Enter a filter name.', 'error'); return; }
+      const params = collectParams();
+      try {
+        const r = await fetch(API_BASE + '/payments/search-filters', {
+          method: 'POST',
+          headers: headers(),
+          credentials: 'include',
+          body: JSON.stringify({ name, queryParams: params })
+        });
+        if (!r.ok) throw new Error((await r.json()).message || await r.text());
+        document.getElementById('filterNameInput').value = '';
+        loadSavedFilters();
+        showMsg('Filter "' + name + '" saved.', 'info');
+      } catch (e) {
+        showMsg('Save failed: ' + (e.message || e), 'error');
+      }
+    });
+
+    loadSavedFilters();
+  </script>
+</body>
+</html>

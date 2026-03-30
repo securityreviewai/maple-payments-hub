@@ -1,0 +1,392 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Operations dashboard | Maple Payments Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --nav-bg: rgba(15, 23, 42, 0.92);
+      --nav-border: rgba(148, 163, 184, 0.12);
+      --accent: #0d9488;
+      --accent-hover: #14b8a6;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --panel-bg: rgba(30, 41, 59, 0.65);
+      --input-bg: rgba(15, 23, 42, 0.85);
+      --stripe: #635bff;
+      --warn: #f59e0b;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Outfit', system-ui, sans-serif;
+      background: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+      min-height: 100vh;
+      color: var(--text);
+    }
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 2rem; background: var(--nav-bg); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--nav-border);
+    }
+    .nav__brand { font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; text-decoration: none; color: inherit; }
+    .nav__brand span { color: var(--accent); }
+    .nav__links { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; }
+    .nav__links a { color: var(--text-muted); text-decoration: none; font-size: 0.9375rem; transition: color 0.2s; }
+    .nav__links a:hover { color: var(--accent); }
+    .nav__links a.active { color: var(--text); }
+    main { padding: 5.5rem 1.5rem 3rem; max-width: 90rem; margin: 0 auto; }
+    h1 { font-size: 1.75rem; margin-bottom: 0.35rem; letter-spacing: -0.02em; }
+    .subtitle { color: var(--text-muted); font-size: 0.9375rem; margin-bottom: 1.5rem; }
+    .auth-banner {
+      background: var(--panel-bg); border: 1px solid var(--nav-border); border-radius: 10px;
+      padding: 1rem 1.25rem; margin-bottom: 1.25rem;
+      display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    }
+    .auth-banner input {
+      flex: 1; min-width: 220px; padding: 0.5rem 0.75rem; background: var(--input-bg);
+      border: 1px solid var(--nav-border); border-radius: 6px; color: var(--text);
+      font-family: 'JetBrains Mono', monospace; font-size: 0.8125rem;
+    }
+    .btn {
+      padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.875rem;
+      cursor: pointer; border: none; font-family: inherit;
+      background: var(--accent); color: white; transition: background 0.2s;
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn--secondary { background: transparent; color: var(--text-muted); border: 1px solid var(--nav-border); }
+    .btn--secondary:hover { border-color: var(--accent); color: var(--accent); }
+    .toolbar { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.5rem; }
+    .toolbar .hint { font-size: 0.8125rem; color: var(--text-muted); }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 1.25rem;
+    }
+    @media (max-width: 960px) { .grid { grid-template-columns: 1fr; } }
+    .card {
+      background: var(--panel-bg); border: 1px solid var(--nav-border);
+      border-radius: 12px; padding: 1.25rem 1.35rem; min-height: 12rem;
+      display: flex; flex-direction: column;
+    }
+    .card__head {
+      display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem;
+      margin-bottom: 1rem;
+    }
+    .card__title { font-size: 1rem; font-weight: 600; }
+    .card__title small { display: block; font-weight: 400; color: var(--text-muted); font-size: 0.8rem; margin-top: 0.2rem; }
+    .badge {
+      font-size: 0.7rem; text-transform: uppercase; letter-spacing: 0.06em;
+      padding: 0.2rem 0.5rem; border-radius: 4px; background: var(--input-bg);
+      color: var(--text-muted);
+    }
+    .badge--stripe { color: #c4b5fd; border: 1px solid rgba(99, 91, 255, 0.35); }
+    .badge--pay { color: var(--accent); border: 1px solid rgba(13, 148, 136, 0.35); }
+    .badge--venmo { color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.35); }
+    .badge--rec { color: var(--warn); border: 1px solid rgba(245, 158, 11, 0.35); }
+    .card__body { flex: 1; font-size: 0.875rem; color: var(--text-muted); }
+    .card__body table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+    .card__body th, .card__body td {
+      padding: 0.45rem 0.35rem; text-align: left; border-bottom: 1px solid var(--nav-border);
+    }
+    .card__body th { color: var(--text-muted); font-weight: 500; font-size: 0.68rem; text-transform: uppercase; letter-spacing: 0.04em; }
+    .stat-row { display: flex; flex-wrap: wrap; gap: 1rem 1.5rem; margin-bottom: 0.75rem; }
+    .stat { min-width: 7rem; }
+    .stat__val { font-size: 1.35rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+    .stat__lbl { font-size: 0.75rem; color: var(--text-muted); }
+    .msg { padding: 0.65rem 0.85rem; border-radius: 6px; font-size: 0.8125rem; margin-top: 0.5rem; }
+    .msg--muted { background: rgba(148, 163, 184, 0.12); color: var(--text-muted); }
+    .msg--err { background: rgba(239, 68, 68, 0.12); color: #fca5a5; }
+    code { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent); }
+    .foot-link { margin-top: auto; padding-top: 0.75rem; font-size: 0.8125rem; }
+    .foot-link a { color: var(--accent); text-decoration: none; }
+    .foot-link a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="/" class="nav__brand">Maple<span>Payments</span> Hub</a>
+    <div class="nav__links">
+      <a href="/">Home</a>
+      <a href="/static/dashboard.html" class="active">Dashboard</a>
+      <a href="/static/search.html">Payment Search</a>
+      <a href="/static/batches.html">SFTP Batches</a>
+      <a href="/api/docs">API Docs</a>
+    </div>
+  </nav>
+
+  <main>
+    <h1>Operations dashboard</h1>
+    <p class="subtitle">One place for recent payments, Stripe card metrics, Venmo import activity, and reconciliation backlog.</p>
+
+    <div class="auth-banner">
+      <span style="color: var(--text-muted); font-size: 0.875rem;">Bearer token</span>
+      <input type="password" id="tokenInput" placeholder="JWT from Swagger Authorize (same roles as APIs below)" autocomplete="off">
+      <button type="button" class="btn btn--secondary" id="saveTokenBtn">Save session</button>
+    </div>
+
+    <div class="toolbar">
+      <button type="button" class="btn" id="refreshBtn">Refresh all</button>
+      <span class="hint">Loads read-only summaries. Deep actions stay in Search, Batches, or API docs.</span>
+    </div>
+
+    <div class="grid">
+      <section class="card" id="card-payments">
+        <div class="card__head">
+          <div>
+            <div class="card__title">Payments <small>Recent from search API</small></div>
+          </div>
+          <span class="badge badge--pay">/payments/search</span>
+        </div>
+        <div class="card__body" id="paymentsBody"></div>
+        <div class="foot-link"><a href="/static/search.html">Open payment search →</a></div>
+      </section>
+
+      <section class="card" id="card-stripe">
+        <div class="card__head">
+          <div>
+            <div class="card__title">Stripe <small>Card PaymentIntent analytics (30d)</small></div>
+          </div>
+          <span class="badge badge--stripe">/stripe/analytics</span>
+        </div>
+        <div class="card__body" id="stripeBody"></div>
+        <div class="foot-link"><a href="/api/docs#/Stripe">Stripe API docs →</a></div>
+      </section>
+
+      <section class="card" id="card-imports">
+        <div class="card__head">
+          <div>
+            <div class="card__title">Imports <small>Venmo card data (your user scope)</small></div>
+          </div>
+          <span class="badge badge--venmo">/venmo/card</span>
+        </div>
+        <div class="card__body" id="importsBody"></div>
+        <div class="foot-link"><a href="/api/docs#/Venmo%20Card">Venmo card API →</a></div>
+      </section>
+
+      <section class="card" id="card-recon">
+        <div class="card__head">
+          <div>
+            <div class="card__title">Reconciliation <small>Unmatched & unreconciled counts</small></div>
+          </div>
+          <span class="badge badge--rec">/reconciliation</span>
+        </div>
+        <div class="card__body" id="reconBody"></div>
+        <div class="foot-link"><a href="/api/docs#/Reconciliation">Reconciliation API →</a></div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    (function () {
+      var API_BASE = (window.location.origin || '') + '/api/v1';
+      var TOKEN_SESSION = 'maple_token';
+      var TOKEN_LOCAL = 'maple_jwt';
+
+      function getToken() {
+        var fromInput = document.getElementById('tokenInput').value.trim();
+        if (fromInput) return fromInput;
+        return sessionStorage.getItem(TOKEN_SESSION) || localStorage.getItem(TOKEN_LOCAL) || '';
+      }
+
+      function headers() {
+        var t = getToken();
+        var h = { 'Accept': 'application/json' };
+        if (t) h['Authorization'] = 'Bearer ' + t;
+        return h;
+      }
+
+      function escapeHtml(s) {
+        if (s == null) return '';
+        var div = document.createElement('div');
+        div.textContent = String(s);
+        return div.innerHTML;
+      }
+
+      function setHtml(el, html) {
+        el.innerHTML = html;
+      }
+
+      function showPlaceholder(el, text, isErr) {
+        setHtml(el, '<p class="msg ' + (isErr ? 'msg--err' : 'msg--muted') + '">' + escapeHtml(text) + '</p>');
+      }
+
+      document.getElementById('saveTokenBtn').addEventListener('click', function () {
+        var v = document.getElementById('tokenInput').value.trim();
+        if (v) {
+          sessionStorage.setItem(TOKEN_SESSION, v);
+          localStorage.setItem(TOKEN_LOCAL, v);
+        }
+        loadAll();
+      });
+
+      document.getElementById('refreshBtn').addEventListener('click', loadAll);
+
+      var saved = sessionStorage.getItem(TOKEN_SESSION) || localStorage.getItem(TOKEN_LOCAL);
+      if (saved) document.getElementById('tokenInput').value = saved;
+
+      function loadPayments() {
+        var el = document.getElementById('paymentsBody');
+        if (!getToken()) {
+          showPlaceholder(el, 'Set a bearer token to load payments.', false);
+          return Promise.resolve();
+        }
+        return fetch(API_BASE + '/payments/search?page=0&size=8', { headers: headers(), credentials: 'include' })
+          .then(function (r) {
+            if (r.status === 401 || r.status === 403) {
+              showPlaceholder(el, 'Unauthorized or forbidden for payment search.', true);
+              return;
+            }
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (data) {
+            if (!data) return;
+            var rows = data.content || [];
+            if (rows.length === 0) {
+              setHtml(el, '<p class="msg msg--muted">No payments in this page.</p>');
+              return;
+            }
+            var html = '<table><thead><tr><th>Reference</th><th>Status</th><th>Amount</th><th>CCY</th></tr></thead><tbody>';
+            rows.forEach(function (p) {
+              var amt = p.amountCents != null ? (p.amountCents / 100).toFixed(2) : '—';
+              html += '<tr><td>' + escapeHtml(p.paymentReference) + '</td><td>' + escapeHtml(p.status) + '</td><td>' + escapeHtml(amt) + '</td><td>' + escapeHtml(p.currency) + '</td></tr>';
+            });
+            html += '</tbody></table>';
+            html += '<p style="margin-top:0.5rem;font-size:0.8rem;color:var(--text-muted)">Total matching: ' + (data.totalElements != null ? data.totalElements : '—') + '</p>';
+            setHtml(el, html);
+          })
+          .catch(function () {
+            showPlaceholder(el, 'Could not load payments.', true);
+          });
+      }
+
+      function loadStripe() {
+        var el = document.getElementById('stripeBody');
+        if (!getToken()) {
+          showPlaceholder(el, 'Set a bearer token for Stripe analytics.', false);
+          return Promise.resolve();
+        }
+        return fetch(API_BASE + '/stripe/analytics/card-payments', { headers: headers(), credentials: 'include' })
+          .then(function (r) {
+            if (r.status === 403) {
+              showPlaceholder(el, 'Stripe analytics requires ROLE_TREASURY_MANAGER, ROLE_AUDITOR, or SCOPE_audit:read.', false);
+              return;
+            }
+            if (r.status === 401) {
+              showPlaceholder(el, 'Unauthorized.', true);
+              return;
+            }
+            if (r.status === 503) {
+              showPlaceholder(el, 'Stripe integration not configured.', false);
+              return;
+            }
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (a) {
+            if (!a) return;
+            var vol = a.totalVolumeCents != null ? (a.totalVolumeCents / 100).toFixed(2) : '0';
+            var html = '<div class="stat-row">';
+            html += '<div class="stat"><div class="stat__val">' + escapeHtml(String(a.succeededCount != null ? a.succeededCount : 0)) + '</div><div class="stat__lbl">Succeeded</div></div>';
+            html += '<div class="stat"><div class="stat__val">' + escapeHtml(String(a.failedCount != null ? a.failedCount : 0)) + '</div><div class="stat__lbl">Failed</div></div>';
+            html += '<div class="stat"><div class="stat__val">' + (a.successRatePercent != null ? a.successRatePercent.toFixed(1) + '%' : '—') + '</div><div class="stat__lbl">Success rate</div></div>';
+            html += '<div class="stat"><div class="stat__val">' + escapeHtml(vol) + '</div><div class="stat__lbl">Volume (major)</div></div>';
+            html += '</div>';
+            if (a.periodStart && a.periodEnd) {
+              html += '<p style="font-size:0.8rem;margin-top:0.25rem">Period: <code>' + escapeHtml(String(a.periodStart)) + '</code> → <code>' + escapeHtml(String(a.periodEnd)) + '</code></p>';
+            }
+            setHtml(el, html);
+          })
+          .catch(function () {
+            showPlaceholder(el, 'Could not load Stripe analytics.', true);
+          });
+      }
+
+      function loadImports() {
+        var el = document.getElementById('importsBody');
+        if (!getToken()) {
+          showPlaceholder(el, 'Set a bearer token for Venmo import stats.', false);
+          return Promise.resolve();
+        }
+        return fetch(API_BASE + '/venmo/card/visualization', { headers: headers(), credentials: 'include' })
+          .then(function (r) {
+            if (r.status === 401) {
+              showPlaceholder(el, 'Unauthorized.', true);
+              return;
+            }
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+          })
+          .then(function (v) {
+            if (!v) return;
+            var cnt = v.transactionCount != null ? v.transactionCount : 0;
+            var spend = v.totalSpendCents != null ? (v.totalSpendCents / 100).toFixed(2) : '0.00';
+            var html = '<div class="stat-row">';
+            html += '<div class="stat"><div class="stat__val">' + escapeHtml(String(cnt)) + '</div><div class="stat__lbl">Imported txns</div></div>';
+            html += '<div class="stat"><div class="stat__val">' + escapeHtml(spend) + '</div><div class="stat__lbl">Total spend (major)</div></div>';
+            html += '</div>';
+            if (cnt === 0) {
+              html += '<p class="msg msg--muted" style="margin-top:0.5rem">No Venmo card rows for this user yet. POST to <code>/api/v1/venmo/card/import</code> to populate.</p>';
+            }
+            setHtml(el, html);
+          })
+          .catch(function () {
+            showPlaceholder(el, 'Could not load Venmo visualization.', true);
+          });
+      }
+
+      function loadRecon() {
+        var el = document.getElementById('reconBody');
+        if (!getToken()) {
+          showPlaceholder(el, 'Set a bearer token for reconciliation status.', false);
+          return Promise.resolve();
+        }
+        return Promise.all([
+          fetch(API_BASE + '/reconciliation/unmatched?page=0&size=1', { headers: headers(), credentials: 'include' }),
+          fetch(API_BASE + '/reconciliation/unreconciled-payments?page=0&size=1', { headers: headers(), credentials: 'include' })
+        ])
+          .then(function (responses) {
+            return Promise.all(responses.map(function (r) {
+              if (r.status === 401 || r.status === 403) return { err: r.status };
+              if (!r.ok) return { err: r.status };
+              return r.json();
+            }));
+          })
+          .then(function (results) {
+            var u = results[0];
+            var p = results[1];
+            if (u.err || p.err) {
+              showPlaceholder(el, 'Unauthorized or missing role for reconciliation list endpoints.', u.err === 401 || p.err === 401);
+              return;
+            }
+            var nu = u.totalElements != null ? u.totalElements : 0;
+            var np = p.totalElements != null ? p.totalElements : 0;
+            var html = '<div class="stat-row">';
+            html += '<div class="stat"><div class="stat__val">' + escapeHtml(String(nu)) + '</div><div class="stat__lbl">Unmatched bank lines</div></div>';
+            html += '<div class="stat"><div class="stat__val">' + escapeHtml(String(np)) + '</div><div class="stat__lbl">Unreconciled payments</div></div>';
+            html += '</div>';
+            html += '<p class="msg msg--muted" style="margin-top:0.35rem">Use statement results and manual match APIs for detail. Counts are global queue depth (first page totals).</p>';
+            setHtml(el, html);
+          })
+          .catch(function () {
+            showPlaceholder(el, 'Could not load reconciliation status.', true);
+          });
+      }
+
+      function loadAll() {
+        loadPayments();
+        loadStripe();
+        loadImports();
+        loadRecon();
+      }
+
+      loadAll();
+    })();
+  </script>
+</body>
+</html>

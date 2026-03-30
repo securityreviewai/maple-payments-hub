@@ -2,9 +2,13 @@ package com.maple.service.payment;
 
 import com.maple.dto.PaymentResponseDto;
 import com.maple.event.PaymentEvents;
+import com.maple.model.Approval;
 import com.maple.model.Payment;
 import com.maple.model.PaymentStatus;
+import com.maple.repository.ApprovalRepository;
+import com.maple.repository.PaymentBatchRepository;
 import com.maple.repository.PaymentRepository;
+import com.maple.service.approval.HolidayCalendarService;
 import com.maple.service.audit.AuditService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,15 +39,24 @@ public class PaymentService {
     private static final Logger logger = LoggerFactory.getLogger(PaymentService.class);
 
     private final PaymentRepository paymentRepository;
+    private final PaymentBatchRepository paymentBatchRepository;
+    private final ApprovalRepository approvalRepository;
     private final AuditService auditService;
+    private final HolidayCalendarService holidayCalendarService;
     private final KafkaTemplate<String, Object> kafkaTemplate;
 
     @Autowired
     public PaymentService(PaymentRepository paymentRepository,
+                         PaymentBatchRepository paymentBatchRepository,
+                         ApprovalRepository approvalRepository,
                          AuditService auditService,
+                         HolidayCalendarService holidayCalendarService,
                          KafkaTemplate<String, Object> kafkaTemplate) {
         this.paymentRepository = paymentRepository;
+        this.paymentBatchRepository = paymentBatchRepository;
+        this.approvalRepository = approvalRepository;
         this.auditService = auditService;
+        this.holidayCalendarService = holidayCalendarService;
         this.kafkaTemplate = kafkaTemplate;
     }
 
@@ -97,33 +110,56 @@ public class PaymentService {
                 "Payment is not in PENDING_APPROVAL status. Current status: " + payment.getStatus());
         }
 
+        holidayCalendarService.assertApprovalAllowed(payment.getHolidayCalendarId(), OffsetDateTime.now());
+
+        if (approvalRepository.existsByPaymentIdAndApproverId(paymentId, approverId)) {
+            throw new PaymentStateException("This approver has already recorded an approval for this payment");
+        }
+
         // Store previous status for audit
         PaymentStatus previousStatus = payment.getStatus();
 
-        // Approve the payment
-        payment.approve(approverId);
+        boolean finalized;
+        try {
+            finalized = payment.recordApproval(approverId);
+        } catch (IllegalStateException e) {
+            throw new PaymentStateException(e.getMessage());
+        }
+
+        Approval approval = new Approval(paymentId, approverId, Approval.ApprovalAction.APPROVED, approvalNote);
+        if (twoFactorVerified != null) {
+            approval.setTwoFactorVerified(twoFactorVerified);
+        }
+        approvalRepository.save(approval);
+
         Payment savedPayment = paymentRepository.save(payment);
 
-        logger.info("Payment {} approved successfully by {}", paymentId, approverId);
-
-        // Audit the approval
-        auditService.auditApprovalEvent(
-            approverId.toString(),
-            "PAYMENT_APPROVED",
-            paymentId,
-            "APPROVE"
-        );
-
-        auditService.auditPaymentStatusChange(
-            approverId.toString(),
-            paymentId,
-            previousStatus.toString(),
-            savedPayment.getStatus().toString()
-        );
-
-        // Publish approval event
-        publishApprovalEvent(savedPayment, approverId, approvalNote, 
-                           twoFactorVerified != null ? twoFactorVerified : false);
+        if (finalized) {
+            logger.info("Payment {} fully approved by {}", paymentId, approverId);
+            auditService.auditApprovalEvent(
+                approverId.toString(),
+                "PAYMENT_APPROVED",
+                paymentId,
+                "APPROVE"
+            );
+            auditService.auditPaymentStatusChange(
+                approverId.toString(),
+                paymentId,
+                previousStatus.toString(),
+                savedPayment.getStatus().toString()
+            );
+            publishApprovalEvent(savedPayment, approverId, approvalNote,
+                    twoFactorVerified != null ? twoFactorVerified : false);
+        } else {
+            logger.info("Payment {} first approval recorded by {} (dual control)", paymentId, approverId);
+            auditService.auditApprovalEvent(
+                approverId.toString(),
+                    "PAYMENT_DUAL_APPROVAL_STEP",
+                    paymentId,
+                    "APPROVE_FIRST"
+            );
+            publishDualApprovalStepEvent(savedPayment, approverId, approvalNote);
+        }
 
         return savedPayment;
     }
@@ -233,26 +269,46 @@ public class PaymentService {
      * Converts Payment entity to response DTO.
      */
     public PaymentResponseDto convertToResponseDto(Payment payment, String operationId) {
-        return PaymentResponseDto.builder()
-                .id(payment.getId())
-                .paymentReference(payment.getPaymentReference())
-                .amountCents(payment.getAmountCents())
-                .formattedAmount(formatAmount(payment.getAmountCents(), payment.getCurrency()))
-                .currency(payment.getCurrency())
-                .debtorAccount(payment.getDebtorAccount())
-                .creditorAccount(payment.getCreditorAccount())
-                .creditorName(payment.getCreditorName())
-                .paymentPurpose(payment.getPaymentPurpose())
-                .status(payment.getStatus())
-                .initiatedBy(payment.getInitiatedBy())
-                .approvedBy(payment.getApprovedBy())
-                .approvalRequired(payment.getApprovalRequired())
-                .submittedAt(payment.getSubmittedAt())
-                .settledAt(payment.getSettledAt())
-                .createdAt(payment.getCreatedAt())
-                .updatedAt(payment.getUpdatedAt())
-                .operationId(operationId)
-                .build();
+        PaymentResponseDto.PaymentResponseDtoBuilder b =
+                PaymentResponseDto.builder()
+                        .id(payment.getId())
+                        .paymentReference(payment.getPaymentReference())
+                        .amountCents(payment.getAmountCents())
+                        .formattedAmount(formatAmount(payment.getAmountCents(), payment.getCurrency()))
+                        .currency(payment.getCurrency())
+                        .debtorAccount(payment.getDebtorAccount())
+                        .creditorAccount(payment.getCreditorAccount())
+                        .creditorName(payment.getCreditorName())
+                        .paymentPurpose(payment.getPaymentPurpose())
+                        .status(payment.getStatus())
+                        .initiatedBy(payment.getInitiatedBy())
+                        .approvedBy(payment.getApprovedBy())
+                        .approvalRequired(payment.getApprovalRequired())
+                        .requiredApprovers(payment.getRequiredApprovers())
+                        .firstApprovalBy(payment.getFirstApprovalBy())
+                        .firstApprovalAt(payment.getFirstApprovalAt())
+                        .escalationDueAt(payment.getEscalationDueAt())
+                        .escalationLevel(payment.getEscalationLevel())
+                        .submittedAt(payment.getSubmittedAt())
+                        .settledAt(payment.getSettledAt())
+                        .iso20022Filename(payment.getIso20022Filename())
+                        .batchId(payment.getBatchId())
+                        .createdAt(payment.getCreatedAt())
+                        .updatedAt(payment.getUpdatedAt())
+                        .operationId(operationId);
+        if (payment.getBatchId() != null) {
+            paymentBatchRepository
+                    .findByBatchReference(payment.getBatchId())
+                    .ifPresent(
+                            pb -> {
+                                b.batchDeliveryStatus(
+                                        pb.getSftpDeliveryStatus() != null
+                                                ? pb.getSftpDeliveryStatus().name()
+                                                : null);
+                                b.batchReceiptReceivedAt(pb.getReceiptReceivedAt());
+                            });
+        }
+        return b.build();
     }
 
     /**
@@ -272,6 +328,22 @@ public class PaymentService {
             logger.debug("Published payment approval event for payment: {}", payment.getId());
         } catch (Exception e) {
             logger.error("Failed to publish payment approval event", e);
+        }
+    }
+
+    private void publishDualApprovalStepEvent(Payment payment, UUID stepApprover, String approvalNote) {
+        try {
+            PaymentEvents.PaymentDualApprovalStep event = new PaymentEvents.PaymentDualApprovalStep(
+                    payment.getId(),
+                    payment.getPaymentReference(),
+                    stepApprover,
+                    payment.getRequiredApprovers(),
+                    approvalNote
+            );
+            kafkaTemplate.send("payments.events", payment.getId().toString(), event);
+            logger.debug("Published dual approval step event for payment: {}", payment.getId());
+        } catch (Exception e) {
+            logger.error("Failed to publish dual approval step event", e);
         }
     }
 
@@ -387,6 +459,19 @@ public class PaymentService {
     public Page<Payment> getPendingApprovals(Pageable pageable) {
         logger.debug("Retrieving pending approvals with pagination");
         return paymentRepository.findPendingApprovals(pageable);
+    }
+
+    /**
+     * Retrieves payments initiated by a specific user with pagination.
+     * Used for user-to-payment mapping queries.
+     *
+     * @param userId User ID (initiator)
+     * @param pageable Pagination parameters
+     * @return Page of payments initiated by the user
+     */
+    public Page<Payment> getPaymentsByUser(UUID userId, Pageable pageable) {
+        logger.debug("Retrieving payments for user: {}", userId);
+        return paymentRepository.findByInitiatedBy(userId, pageable);
     }
 
     /**
