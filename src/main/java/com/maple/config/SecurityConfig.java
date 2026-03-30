@@ -64,10 +64,14 @@ public class SecurityConfig {
                 // Public health endpoints
                 .requestMatchers("/public/**").permitAll()
                 
+                // Static shell (dashboard, search UI); APIs remain authenticated
+                .requestMatchers(HttpMethod.GET, "/", "/index.html", "/static/**").permitAll()
+                
                 // Admin UI (requires authentication but role check done in controllers)
                 .requestMatchers("/admin/**").authenticated()
                 
                 // API endpoints with role-based access
+                .requestMatchers(HttpMethod.GET, "/api/v1/user-mappings/**").hasAnyAuthority("SCOPE_payments:read", "ROLE_TREASURY_OPS", "ROLE_AUDITOR")
                 .requestMatchers(HttpMethod.GET, "/api/v1/payments/**").hasAnyAuthority("SCOPE_payments:read", "ROLE_TREASURY_OPS", "ROLE_TREASURY_MANAGER", "ROLE_AUDITOR")
                 .requestMatchers(HttpMethod.POST, "/api/v1/payments").hasAnyAuthority("SCOPE_payments:write", "ROLE_TREASURY_OPS")
                 .requestMatchers(HttpMethod.POST, "/api/v1/payments/*/approve").hasAnyAuthority("SCOPE_approval:write", "ROLE_TREASURY_MANAGER")

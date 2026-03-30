@@ -305,4 +305,54 @@ public class PaymentEvents {
             this.daysSinceSubmission = daysSinceSubmission;
         }
     }
+
+    /**
+     * First approver recorded for dual control; payment remains pending second approval.
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PaymentDualApprovalStep extends PaymentEvent {
+        @JsonProperty("stepApprover")
+        private UUID stepApprover;
+
+        @JsonProperty("requiredApprovers")
+        private Integer requiredApprovers;
+
+        @JsonProperty("approvalNote")
+        private String approvalNote;
+
+        public PaymentDualApprovalStep(UUID paymentId, String paymentReference, UUID stepApprover,
+                                       Integer requiredApprovers, String approvalNote) {
+            super(paymentId, paymentReference, "PAYMENT_DUAL_APPROVAL_STEP");
+            this.stepApprover = stepApprover;
+            this.requiredApprovers = requiredApprovers;
+            this.approvalNote = approvalNote;
+        }
+    }
+
+    /**
+     * Published when a pending approval exceeds configured business-time thresholds (stuck approval).
+     */
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class PaymentApprovalEscalated extends PaymentEvent {
+        @JsonProperty("escalationLevel")
+        private Integer escalationLevel;
+
+        @JsonProperty("pendingSince")
+        private OffsetDateTime pendingSince;
+
+        @JsonProperty("reason")
+        private String reason;
+
+        public PaymentApprovalEscalated(UUID paymentId, String paymentReference, Integer escalationLevel,
+                                       OffsetDateTime pendingSince, String reason) {
+            super(paymentId, paymentReference, "PAYMENT_APPROVAL_ESCALATED");
+            this.escalationLevel = escalationLevel;
+            this.pendingSince = pendingSince;
+            this.reason = reason;
+        }
+    }
 }

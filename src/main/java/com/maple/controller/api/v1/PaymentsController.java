@@ -1,8 +1,14 @@
 package com.maple.controller.api.v1;
 
+import com.maple.dto.PaymentAnalyticsDto;
 import com.maple.dto.PaymentRequestDto;
 import com.maple.dto.PaymentResponseDto;
+import com.maple.model.PaymentStatus;
+import com.maple.model.Payment;
+import com.maple.service.payment.PaymentService;
+import com.maple.service.payment.PaymentStatisticsService;
 import com.maple.service.payment.PaymentSubmissionService;
+import com.maple.service.sftp.PaymentBatchDeliveryService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -20,8 +26,12 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.time.OffsetDateTime;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 /**
  * REST controller for payment operations.
@@ -39,10 +49,19 @@ public class PaymentsController {
     private static final Logger logger = LoggerFactory.getLogger(PaymentsController.class);
 
     private final PaymentSubmissionService paymentSubmissionService;
+    private final PaymentService paymentService;
+    private final PaymentStatisticsService paymentStatisticsService;
+    private final PaymentBatchDeliveryService paymentBatchDeliveryService;
 
     @Autowired
-    public PaymentsController(PaymentSubmissionService paymentSubmissionService) {
+    public PaymentsController(PaymentSubmissionService paymentSubmissionService,
+                             PaymentService paymentService,
+                             PaymentStatisticsService paymentStatisticsService,
+                             PaymentBatchDeliveryService paymentBatchDeliveryService) {
         this.paymentSubmissionService = paymentSubmissionService;
+        this.paymentService = paymentService;
+        this.paymentStatisticsService = paymentStatisticsService;
+        this.paymentBatchDeliveryService = paymentBatchDeliveryService;
     }
 
     @PostMapping
@@ -118,10 +137,36 @@ public class PaymentsController {
 
         logger.debug("Retrieving payment: {} for user: {}", id, authentication.getName());
 
-        // TODO: Implement payment retrieval with appropriate field masking
-        // based on user roles and permissions
-        
-        return ResponseEntity.ok().build();
+        String operationId = UUID.randomUUID().toString();
+
+        try {
+            // Get payment (without locking since this is a read operation)
+            com.maple.model.Payment payment = paymentService.findPaymentById(id);
+            
+            // Convert to DTO
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+            
+            // Apply field masking based on user roles
+            // Treasury ops and auditors see masked accounts
+            boolean hasFullAccess = authentication.getAuthorities().stream()
+                    .anyMatch(auth -> auth.getAuthority().contains("ROLE_CLEARING") ||
+                                   auth.getAuthority().contains("ROLE_TREASURY_MANAGER"));
+            
+            if (!hasFullAccess) {
+                response = response.maskSensitiveFields();
+            }
+            
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error retrieving payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to retrieve payment", e);
+        }
     }
 
     @PostMapping("/{id}/approve")
@@ -147,13 +192,38 @@ public class PaymentsController {
         logger.info("Payment approval request for: {} by user: {}", id, authentication.getName());
 
         String operationId = requestId != null ? requestId : UUID.randomUUID().toString();
-        
-        // TODO: Implement payment approval logic
-        // Extract approval note from request body
-        // Verify 2FA if required
-        // Update payment status and publish events
-        
-        return ResponseEntity.ok().build();
+
+        try {
+            // Extract user ID from authentication
+            UUID approverId = UUID.fromString(authentication.getName());
+            
+            // Extract approval note and 2FA verification from request body
+            String approvalNote = approvalData != null ? approvalData.get("approvalNote") : null;
+            Boolean twoFactorVerified = approvalData != null && approvalData.containsKey("twoFactorVerified") 
+                    ? Boolean.parseBoolean(approvalData.get("twoFactorVerified")) 
+                    : false;
+            
+            // Approve the payment
+            com.maple.model.Payment payment = paymentService.approvePayment(
+                    id, approverId, approvalNote, twoFactorVerified);
+            
+            // Convert to response DTO
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+            
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for approval: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (PaymentService.PaymentStateException e) {
+            logger.warn("Invalid payment state for approval: {} - {}", id, e.getMessage());
+            throw new PaymentValidationException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error approving payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to approve payment", e);
+        }
     }
 
     @PostMapping("/{id}/reject")
@@ -174,9 +244,40 @@ public class PaymentsController {
 
         logger.info("Payment rejection request for: {} by user: {}", id, authentication.getName());
 
-        // TODO: Implement payment rejection logic
-        
-        return ResponseEntity.ok().build();
+        String operationId = UUID.randomUUID().toString();
+
+        try {
+            // Extract user ID from authentication
+            UUID rejectorId = UUID.fromString(authentication.getName());
+            
+            // Extract rejection reason from request body (required)
+            String rejectionReason = rejectionData != null ? rejectionData.get("rejectionReason") : null;
+            if (rejectionReason == null || rejectionReason.trim().isEmpty()) {
+                throw new PaymentValidationException("Rejection reason is required");
+            }
+            
+            // Reject the payment
+            com.maple.model.Payment payment = paymentService.rejectPayment(id, rejectorId, rejectionReason);
+            
+            // Convert to response DTO
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+            
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for rejection: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (PaymentService.PaymentStateException e) {
+            logger.warn("Invalid payment state for rejection: {} - {}", id, e.getMessage());
+            throw new PaymentValidationException(e.getMessage());
+        } catch (PaymentValidationException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Unexpected error rejecting payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to reject payment", e);
+        }
     }
 
     @PostMapping("/{id}/cancel")
@@ -197,9 +298,37 @@ public class PaymentsController {
 
         logger.info("Payment cancellation request for: {} by user: {}", id, authentication.getName());
 
-        // TODO: Implement payment cancellation logic
-        
-        return ResponseEntity.ok().build();
+        String operationId = UUID.randomUUID().toString();
+
+        try {
+            // Extract user ID from authentication
+            UUID cancellerId = UUID.fromString(authentication.getName());
+            
+            // Extract cancellation reason from request body (optional)
+            String cancellationReason = cancellationData != null 
+                    ? cancellationData.get("cancellationReason") 
+                    : "Cancelled by user";
+            
+            // Cancel the payment
+            com.maple.model.Payment payment = paymentService.cancelPayment(id, cancellerId, cancellationReason);
+            
+            // Convert to response DTO
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+            
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for cancellation: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (PaymentService.PaymentStateException e) {
+            logger.warn("Invalid payment state for cancellation: {} - {}", id, e.getMessage());
+            throw new PaymentValidationException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error cancelling payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to cancel payment", e);
+        }
     }
 
     @PostMapping("/{id}/submit-to-clearing")
@@ -222,12 +351,464 @@ public class PaymentsController {
 
         logger.info("Clearing submission request for: {} by user: {}", id, authentication.getName());
 
-        // TODO: Implement clearing submission logic
-        // Generate ISO20022 message
-        // Submit via SFTP
-        // Update payment status
+        String operationId = idempotencyKey != null ? idempotencyKey : UUID.randomUUID().toString();
+        UUID actorId = UUID.fromString(authentication.getName());
+        try {
+            Payment updated = paymentBatchDeliveryService.submitSinglePaymentToClearing(id, actorId);
+            PaymentResponseDto body = paymentService.convertToResponseDto(updated, operationId);
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(body);
+        } catch (IllegalArgumentException e) {
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (IllegalStateException e) {
+            throw new PaymentValidationException(e.getMessage());
+        }
+    }
+
+    @PostMapping("/batch/approve")
+    @Operation(
+        summary = "Batch approve multiple payments",
+        description = "Approves multiple payments in a single operation. " +
+                     "Returns results for each payment indicating success or failure.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Batch approval processed"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "403", description = "Insufficient permissions")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_approval:write') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<Map<String, Object>> batchApprovePayments(
+            @RequestBody Map<String, Object> batchRequest,
+            Authentication authentication) {
+
+        logger.info("Batch approval request for {} payments by user: {}", 
+                   batchRequest.get("paymentIds"), authentication.getName());
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<String> paymentIdStrings = (List<String>) batchRequest.get("paymentIds");
+            List<UUID> paymentIds = paymentIdStrings.stream()
+                .map(UUID::fromString)
+                .collect(Collectors.toList());
+
+            UUID approverId = UUID.fromString(authentication.getName());
+            String approvalNote = (String) batchRequest.get("approvalNote");
+            Boolean twoFactorVerified = batchRequest.containsKey("twoFactorVerified") 
+                ? Boolean.valueOf(batchRequest.get("twoFactorVerified").toString()) 
+                : false;
+
+            Map<UUID, PaymentService.BatchOperationResult> results = 
+                paymentService.batchApprovePayments(paymentIds, approverId, approvalNote, twoFactorVerified);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("totalProcessed", paymentIds.size());
+            response.put("successCount", results.values().stream().mapToLong(r -> r.isSuccess() ? 1 : 0).sum());
+            response.put("failureCount", results.values().stream().mapToLong(r -> r.isSuccess() ? 0 : 1).sum());
+            response.put("results", results);
+
+            return ResponseEntity.ok(response);
+
+        } catch (Exception e) {
+            logger.error("Error processing batch approval", e);
+            throw new PaymentProcessingException("Batch approval failed", e);
+        }
+    }
+
+    @PostMapping("/batch/reject")
+    @Operation(
+        summary = "Batch reject multiple payments",
+        description = "Rejects multiple payments in a single operation.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Batch rejection processed"),
+            @ApiResponse(responseCode = "400", description = "Invalid request"),
+            @ApiResponse(responseCode = "403", description = "Insufficient permissions")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_approval:write') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<Map<String, Object>> batchRejectPayments(
+            @RequestBody Map<String, Object> batchRequest,
+            Authentication authentication) {
+
+        logger.info("Batch rejection request for {} payments by user: {}", 
+                   batchRequest.get("paymentIds"), authentication.getName());
+
+        try {
+            @SuppressWarnings("unchecked")
+            List<String> paymentIdStrings = (List<String>) batchRequest.get("paymentIds");
+            List<UUID> paymentIds = paymentIdStrings.stream()
+                .map(UUID::fromString)
+                .collect(Collectors.toList());
+
+            UUID rejectorId = UUID.fromString(authentication.getName());
+            String rejectionReason = (String) batchRequest.get("rejectionReason");
+            
+            if (rejectionReason == null || rejectionReason.trim().isEmpty()) {
+                throw new PaymentValidationException("Rejection reason is required for batch rejection");
+            }
+
+            Map<UUID, PaymentService.BatchOperationResult> results = 
+                paymentService.batchRejectPayments(paymentIds, rejectorId, rejectionReason);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("totalProcessed", paymentIds.size());
+            response.put("successCount", results.values().stream().mapToLong(r -> r.isSuccess() ? 1 : 0).sum());
+            response.put("failureCount", results.values().stream().mapToLong(r -> r.isSuccess() ? 0 : 1).sum());
+            response.put("results", results);
+
+            return ResponseEntity.ok(response);
+
+        } catch (PaymentValidationException e) {
+            throw e;
+        } catch (Exception e) {
+            logger.error("Error processing batch rejection", e);
+            throw new PaymentProcessingException("Batch rejection failed", e);
+        }
+    }
+
+    @GetMapping("/{id}/history")
+    @Operation(
+        summary = "Get payment history",
+        description = "Retrieves the complete history and audit trail for a payment.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Payment history retrieved"),
+            @ApiResponse(responseCode = "404", description = "Payment not found")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_OPS') or hasAuthority('ROLE_AUDITOR')")
+    public ResponseEntity<List<PaymentService.PaymentHistoryEntry>> getPaymentHistory(
+            @Parameter(description = "Payment ID") @PathVariable UUID id,
+            Authentication authentication) {
+
+        logger.debug("Retrieving payment history for: {} by user: {}", id, authentication.getName());
+
+        try {
+            List<PaymentService.PaymentHistoryEntry> history = paymentService.getPaymentHistory(id);
+            return ResponseEntity.ok(history);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for history retrieval: {}", id);
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Error retrieving payment history: {}", id, e);
+            throw new PaymentProcessingException("Failed to retrieve payment history", e);
+        }
+    }
+
+    @GetMapping("/analytics")
+    @Operation(
+        summary = "Get payment analytics",
+        description = "Retrieves aggregated payment analytics for dashboards and reporting. " +
+                     "Returns total count, volume, success rate, and status breakdown.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Analytics retrieved"),
+            @ApiResponse(responseCode = "400", description = "Invalid date range")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_audit:read') or hasAuthority('ROLE_AUDITOR') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<PaymentAnalyticsDto> getPaymentAnalytics(
+            @Parameter(description = "Start date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime startDate,
+            @Parameter(description = "End date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime endDate,
+            Authentication authentication) {
+
+        logger.debug("Retrieving payment analytics by user: {}", authentication.getName());
+
+        OffsetDateTime start = startDate != null ? startDate : OffsetDateTime.now().minusDays(30);
+        OffsetDateTime end = endDate != null ? endDate : OffsetDateTime.now();
+
+        if (!start.isBefore(end) && !start.isEqual(end)) {
+            throw new PaymentValidationException("Start date must be before or equal to end date");
+        }
+        if (java.time.Duration.between(start, end).toDays() > 365) {
+            throw new PaymentValidationException("Date range cannot exceed 365 days");
+        }
+
+        Map<PaymentStatus, Long> statusBreakdown = paymentStatisticsService.getStatusBreakdown(start, end);
+        long totalCount = statusBreakdown.values().stream().mapToLong(Long::longValue).sum();
+
+        PaymentAnalyticsDto analytics = PaymentAnalyticsDto.builder()
+                .periodStart(start)
+                .periodEnd(end)
+                .totalCount(totalCount)
+                .totalVolumeCents(paymentStatisticsService.calculateTotalVolume(start, end))
+                .averageAmountCents(paymentStatisticsService.calculateAveragePaymentAmount(start, end))
+                .successRatePercent(paymentStatisticsService.calculateSuccessRate(start, end))
+                .statusBreakdown(statusBreakdown)
+                .build();
+
+        return ResponseEntity.ok(analytics);
+    }
+
+    @GetMapping("/statistics")
+    @Operation(
+        summary = "Get payment statistics",
+        description = "Retrieves aggregated payment statistics and metrics.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Statistics retrieved")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_audit:read') or hasAuthority('ROLE_AUDITOR') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<Map<String, Object>> getPaymentStatistics(
+            @Parameter(description = "Start date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime startDate,
+            @Parameter(description = "End date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime endDate,
+            Authentication authentication) {
+
+        logger.debug("Retrieving payment statistics by user: {}", authentication.getName());
+
+        OffsetDateTime start = startDate != null ? startDate : OffsetDateTime.now().minusDays(30);
+        OffsetDateTime end = endDate != null ? endDate : OffsetDateTime.now();
+
+        Map<String, Object> statistics = new HashMap<>();
+        statistics.put("overallStatistics", paymentStatisticsService.getOverallStatistics());
+        statistics.put("totalVolume", paymentStatisticsService.calculateTotalVolume(start, end));
+        statistics.put("averagePaymentAmount", paymentStatisticsService.calculateAveragePaymentAmount(start, end));
+        statistics.put("successRate", paymentStatisticsService.calculateSuccessRate(start, end));
+        statistics.put("approvalRate", paymentStatisticsService.calculateApprovalRate(start, end));
+        statistics.put("statusBreakdown", paymentStatisticsService.getStatusBreakdown(start, end));
+        statistics.put("pendingApprovalsCount", paymentStatisticsService.getPendingApprovalsCount());
+        statistics.put("periodStart", start);
+        statistics.put("periodEnd", end);
+
+        return ResponseEntity.ok(statistics);
+    }
+
+    @GetMapping("/pending-approvals")
+    @Operation(
+        summary = "Get pending approvals",
+        description = "Retrieves payments that are pending approval with pagination.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Pending approvals retrieved")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_approval:write') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<Map<String, Object>> getPendingApprovals(
+            @Parameter(description = "Page number (0-indexed)") 
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size") 
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+
+        logger.debug("Retrieving pending approvals by user: {}", authentication.getName());
+
+        org.springframework.data.domain.Pageable pageable = 
+            org.springframework.data.domain.PageRequest.of(page, size);
         
-        return ResponseEntity.ok().build();
+        org.springframework.data.domain.Page<com.maple.model.Payment> pendingPayments = 
+            paymentService.getPendingApprovals(pageable);
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", pendingPayments.getContent().stream()
+            .map(p -> paymentService.convertToResponseDto(p, UUID.randomUUID().toString()))
+            .collect(Collectors.toList()));
+        response.put("totalElements", pendingPayments.getTotalElements());
+        response.put("totalPages", pendingPayments.getTotalPages());
+        response.put("currentPage", page);
+        response.put("pageSize", size);
+
+        return ResponseEntity.ok(response);
+    }
+
+    @PostMapping("/{id}/retry")
+    @Operation(
+        summary = "Retry a failed payment",
+        description = "Retries a payment that previously failed. " +
+                     "Resets the payment status to allow reprocessing.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Payment retried successfully"),
+            @ApiResponse(responseCode = "400", description = "Payment cannot be retried"),
+            @ApiResponse(responseCode = "404", description = "Payment not found")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:write') or hasAuthority('ROLE_TREASURY_OPS')")
+    public ResponseEntity<PaymentResponseDto> retryPayment(
+            @Parameter(description = "Payment ID") @PathVariable UUID id,
+            @RequestBody(required = false) Map<String, String> retryData,
+            Authentication authentication) {
+
+        logger.info("Payment retry request for: {} by user: {}", id, authentication.getName());
+
+        String operationId = UUID.randomUUID().toString();
+
+        try {
+            UUID retryBy = UUID.fromString(authentication.getName());
+            String retryReason = retryData != null 
+                    ? retryData.get("retryReason") 
+                    : "Payment retry requested by user";
+
+            com.maple.model.Payment payment = paymentService.retryFailedPayment(id, retryBy, retryReason);
+            PaymentResponseDto response = paymentService.convertToResponseDto(payment, operationId);
+
+            return ResponseEntity.ok()
+                    .header("X-Operation-ID", operationId)
+                    .body(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found for retry: {} requested by user: {}", id, authentication.getName());
+            throw new PaymentNotFoundException(e.getMessage());
+        } catch (PaymentService.PaymentStateException e) {
+            logger.warn("Invalid payment state for retry: {} - {}", id, e.getMessage());
+            throw new PaymentValidationException(e.getMessage());
+        } catch (Exception e) {
+            logger.error("Unexpected error retrying payment: {}", id, e);
+            throw new PaymentProcessingException("Failed to retry payment", e);
+        }
+    }
+
+    @GetMapping("/search")
+    @Operation(
+        summary = "Search payments with filters",
+        description = "Searches payments using multiple filter criteria. " +
+                     "Supports pagination and various filters including amount range, currency, status, etc.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Payments retrieved successfully")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_OPS') or hasAuthority('ROLE_AUDITOR')")
+    public ResponseEntity<Map<String, Object>> searchPayments(
+            @Parameter(description = "Payment reference (partial match)") 
+            @RequestParam(required = false) String paymentReference,
+            @Parameter(description = "Debtor account (partial match)") 
+            @RequestParam(required = false) String debtorAccount,
+            @Parameter(description = "Creditor account (partial match)") 
+            @RequestParam(required = false) String creditorAccount,
+            @Parameter(description = "Payment status") 
+            @RequestParam(required = false) com.maple.model.PaymentStatus status,
+            @Parameter(description = "Initiator user ID") 
+            @RequestParam(required = false) UUID initiatedBy,
+            @Parameter(description = "Start date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime startDate,
+            @Parameter(description = "End date (ISO 8601)") 
+            @RequestParam(required = false) OffsetDateTime endDate,
+            @Parameter(description = "Minimum amount in cents") 
+            @RequestParam(required = false) Long minAmountCents,
+            @Parameter(description = "Maximum amount in cents") 
+            @RequestParam(required = false) Long maxAmountCents,
+            @Parameter(description = "Currency code") 
+            @RequestParam(required = false) String currency,
+            @Parameter(description = "Page number (0-indexed)") 
+            @RequestParam(defaultValue = "0") int page,
+            @Parameter(description = "Page size") 
+            @RequestParam(defaultValue = "20") int size,
+            Authentication authentication) {
+
+        logger.debug("Payment search request by user: {}", authentication.getName());
+
+        org.springframework.data.domain.Pageable pageable = 
+            org.springframework.data.domain.PageRequest.of(page, size);
+
+        org.springframework.data.domain.Page<com.maple.model.Payment> payments = 
+            paymentService.searchPayments(
+                paymentReference, debtorAccount, creditorAccount, status,
+                initiatedBy, startDate, endDate, minAmountCents,
+                maxAmountCents, currency, pageable
+            );
+
+        Map<String, Object> response = new HashMap<>();
+        response.put("content", payments.getContent().stream()
+            .map(p -> paymentService.convertToResponseDto(p, UUID.randomUUID().toString()))
+            .collect(Collectors.toList()));
+        response.put("totalElements", payments.getTotalElements());
+        response.put("totalPages", payments.getTotalPages());
+        response.put("currentPage", page);
+        response.put("pageSize", size);
+
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/retryable-failures")
+    @Operation(
+        summary = "Get retryable failed payments",
+        description = "Retrieves payments that failed and may be eligible for retry.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Failed payments retrieved")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_OPS')")
+    public ResponseEntity<List<PaymentResponseDto>> getRetryableFailedPayments(
+            @Parameter(description = "Hours since failure") 
+            @RequestParam(defaultValue = "24") int hoursSinceFailure,
+            Authentication authentication) {
+
+        logger.debug("Retrieving retryable failed payments by user: {}", authentication.getName());
+
+        List<com.maple.model.Payment> failedPayments = 
+            paymentService.getRetryableFailedPayments(hoursSinceFailure);
+
+        List<PaymentResponseDto> response = failedPayments.stream()
+            .map(p -> paymentService.convertToResponseDto(p, UUID.randomUUID().toString()))
+            .collect(Collectors.toList());
+
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/requiring-attention")
+    @Operation(
+        summary = "Get payments requiring attention",
+        description = "Retrieves payments that require attention such as pending approvals " +
+                     "for too long or failed payments that may need retry.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Payments requiring attention retrieved")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_MANAGER')")
+    public ResponseEntity<List<PaymentResponseDto>> getPaymentsRequiringAttention(
+            @Parameter(description = "Hours threshold for pending approvals") 
+            @RequestParam(defaultValue = "48") int pendingApprovalHoursThreshold,
+            Authentication authentication) {
+
+        logger.debug("Retrieving payments requiring attention by user: {}", authentication.getName());
+
+        List<com.maple.model.Payment> attentionRequired = 
+            paymentService.getPaymentsRequiringAttention(pendingApprovalHoursThreshold);
+
+        List<PaymentResponseDto> response = attentionRequired.stream()
+            .map(p -> paymentService.convertToResponseDto(p, UUID.randomUUID().toString()))
+            .collect(Collectors.toList());
+
+        return ResponseEntity.ok(response);
+    }
+
+    @GetMapping("/{id}/status-transition-check")
+    @Operation(
+        summary = "Check if status transition is valid",
+        description = "Validates if a payment can transition from its current status to a target status.",
+        responses = {
+            @ApiResponse(responseCode = "200", description = "Transition validity checked")
+        }
+    )
+    @PreAuthorize("hasAuthority('SCOPE_payments:read') or hasAuthority('ROLE_TREASURY_OPS')")
+    public ResponseEntity<Map<String, Object>> checkStatusTransition(
+            @Parameter(description = "Payment ID") @PathVariable UUID id,
+            @Parameter(description = "Target status") 
+            @RequestParam com.maple.model.PaymentStatus targetStatus,
+            Authentication authentication) {
+
+        logger.debug("Checking status transition for payment: {} to status: {}", id, targetStatus);
+
+        try {
+            com.maple.model.Payment payment = paymentService.findPaymentById(id);
+            boolean isValid = paymentService.isValidStatusTransition(
+                payment.getStatus(), targetStatus);
+
+            Map<String, Object> response = new HashMap<>();
+            response.put("paymentId", id);
+            response.put("currentStatus", payment.getStatus());
+            response.put("targetStatus", targetStatus);
+            response.put("transitionValid", isValid);
+            response.put("message", isValid 
+                ? "Transition is allowed" 
+                : "Transition is not allowed from current status");
+
+            return ResponseEntity.ok(response);
+
+        } catch (PaymentService.PaymentNotFoundException e) {
+            logger.warn("Payment not found: {}", id);
+            throw new PaymentNotFoundException(e.getMessage());
+        }
     }
 
     // Exception classes for this controller
@@ -235,6 +816,13 @@ public class PaymentsController {
     @ResponseStatus(HttpStatus.BAD_REQUEST)
     public static class PaymentValidationException extends RuntimeException {
         public PaymentValidationException(String message) {
+            super(message);
+        }
+    }
+
+    @ResponseStatus(HttpStatus.NOT_FOUND)
+    public static class PaymentNotFoundException extends RuntimeException {
+        public PaymentNotFoundException(String message) {
             super(message);
         }
     }

@@ -79,6 +79,26 @@ public class PaymentResponseDto {
     @JsonProperty("approvalRequired")
     private Boolean approvalRequired;
 
+    @Schema(description = "Distinct approvers required (1 single control, 2 dual control)")
+    @JsonProperty("requiredApprovers")
+    private Integer requiredApprovers;
+
+    @Schema(description = "First approver when dual control is in progress")
+    @JsonProperty("firstApprovalBy")
+    private UUID firstApprovalBy;
+
+    @Schema(description = "When the first approval was recorded (dual control)")
+    @JsonProperty("firstApprovalAt")
+    private OffsetDateTime firstApprovalAt;
+
+    @Schema(description = "When the next stuck-approval escalation is due")
+    @JsonProperty("escalationDueAt")
+    private OffsetDateTime escalationDueAt;
+
+    @Schema(description = "Number of escalation events already raised for this payment")
+    @JsonProperty("escalationLevel")
+    private Integer escalationLevel;
+
     @Schema(description = "When the payment was submitted to clearing")
     @JsonProperty("submittedAt")
     private OffsetDateTime submittedAt;
@@ -94,6 +114,14 @@ public class PaymentResponseDto {
     @Schema(description = "Batch ID if payment was included in a batch")
     @JsonProperty("batchId")
     private String batchId;
+
+    @Schema(description = "SFTP delivery status for the payment's batch (when batched)")
+    @JsonProperty("batchDeliveryStatus")
+    private String batchDeliveryStatus;
+
+    @Schema(description = "When partner receipt was recorded for the batch (if applicable)")
+    @JsonProperty("batchReceiptReceivedAt")
+    private OffsetDateTime batchReceiptReceivedAt;
 
     @Schema(description = "When the payment was created")
     @JsonProperty("createdAt")
@@ -131,11 +159,18 @@ public class PaymentResponseDto {
                 .initiatedBy(this.initiatedBy)
                 .approvedBy(this.approvedBy)
                 .approvalRequired(this.approvalRequired)
+                .requiredApprovers(this.requiredApprovers)
+                .firstApprovalBy(this.firstApprovalBy)
+                .firstApprovalAt(this.firstApprovalAt)
+                .escalationDueAt(this.escalationDueAt)
+                .escalationLevel(this.escalationLevel)
                 .submittedAt(this.submittedAt)
                 .settledAt(this.settledAt)
                 // Hide sensitive operational fields
                 .iso20022Filename(null)
                 .batchId(null)
+                .batchDeliveryStatus(null)
+                .batchReceiptReceivedAt(null)
                 .createdAt(this.createdAt)
                 .updatedAt(this.updatedAt)
                 .metadata(null)

@@ -125,6 +125,14 @@ maple:
     batch-size: ${MAPLE_PAYMENT_BATCH_SIZE:100}
     batch-schedule: ${MAPLE_PAYMENT_BATCH_SCHEDULE:0 */30 * * * *}
     max-daily-limit-cents: 1000000000
+    batch-creator-user-id: ${MAPLE_BATCH_CREATOR_USER_ID:00000000-0000-0000-0000-000000000001}
+
+  approval:
+    default-holiday-calendar-id: ${MAPLE_APPROVAL_DEFAULT_HOLIDAY_CALENDAR_ID:a0000000-0000-4000-8000-000000000001}
+    stuck-approval-hours: ${MAPLE_APPROVAL_STUCK_HOURS:24}
+    repeat-escalation-hours: ${MAPLE_APPROVAL_REPEAT_ESCALATION_HOURS:24}
+    escalation-scan-ms: ${MAPLE_APPROVAL_ESCALATION_SCAN_MS:300000}
+    block-weekends: ${MAPLE_APPROVAL_BLOCK_WEEKENDS:true}
     
   sftp:
     host: ${MAPLE_SFTP_HOST:localhost}
@@ -134,6 +142,19 @@ maple:
     remote-dir: ${MAPLE_SFTP_REMOTE_DIR:/uploads}
     connect-timeout: 30000
     session-timeout: 60000
+    batch:
+      enabled: ${MAPLE_SFTP_BATCH_ENABLED:true}
+      receipts-subdir: ${MAPLE_SFTP_RECEIPTS_SUBDIR:receipts}
+      receipt-suffix: ${MAPLE_SFTP_RECEIPT_SUFFIX:.rcpt}
+      max-retries: ${MAPLE_SFTP_BATCH_MAX_RETRIES:5}
+      retry-base-delay-ms: ${MAPLE_SFTP_BATCH_RETRY_BASE_MS:60000}
+      retry-scan-ms: ${MAPLE_SFTP_BATCH_RETRY_SCAN_MS:120000}
+      receipt-poll-ms: ${MAPLE_SFTP_RECEIPT_POLL_MS:180000}
+      strict-host-key-checking: ${MAPLE_SFTP_STRICT_HOST_KEY:false}
+      known-hosts-path: ${MAPLE_SFTP_KNOWN_HOSTS_PATH:}
+      upload-immediate-attempts: ${MAPLE_SFTP_UPLOAD_ATTEMPTS:3}
+      upload-immediate-backoff-ms: ${MAPLE_SFTP_UPLOAD_BACKOFF_MS:2000}
+      receipt-preview-max-chars: ${MAPLE_SFTP_RECEIPT_PREVIEW_MAX:4000}
     
   hsm:
     mode: ${MAPLE_HSM_MODE:simulated}

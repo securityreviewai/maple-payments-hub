@@ -6,6 +6,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
@@ -69,6 +70,20 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
     List<Payment> findReadyForBatching(Pageable pageable);
 
     /**
+     * Same as {@link #findReadyForBatching(Pageable)} but locks rows for batch assembly (avoid duplicate batching).
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("SELECT p FROM Payment p WHERE p.status = 'APPROVED' AND p.batchId IS NULL ORDER BY p.createdAt ASC")
+    List<Payment> findReadyForBatchingForUpdate(Pageable pageable);
+
+    /**
+     * Clears batch assignment when a batch is abandoned (dead letter) so payments can be re-batched.
+     */
+    @Modifying
+    @Query("UPDATE Payment p SET p.batchId = null WHERE p.batchId = :batchReference")
+    int clearBatchAssignment(@Param("batchReference") String batchReference);
+
+    /**
      * Find payments by batch ID.
      */
     List<Payment> findByBatchId(String batchId);
@@ -99,6 +114,23 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
     Long calculateTotalAmountForUserInPeriod(@Param("userId") UUID userId,
                                            @Param("startDate") OffsetDateTime startDate,
                                            @Param("endDate") OffsetDateTime endDate);
+
+    /**
+     * Count distinct users (initiators) who created at least one payment in the period.
+     * Used for aggregated user-activity analytics only; does not expose user identifiers.
+     */
+    @Query("SELECT COUNT(DISTINCT p.initiatedBy) FROM Payment p " +
+           "WHERE p.createdAt >= :startDate AND p.createdAt <= :endDate")
+    long countDistinctInitiatorsInPeriod(@Param("startDate") OffsetDateTime startDate,
+                                        @Param("endDate") OffsetDateTime endDate);
+
+    /**
+     * Count payments created in the period (all statuses).
+     */
+    @Query("SELECT COUNT(p) FROM Payment p " +
+           "WHERE p.createdAt >= :startDate AND p.createdAt <= :endDate")
+    long countCreatedInPeriod(@Param("startDate") OffsetDateTime startDate,
+                             @Param("endDate") OffsetDateTime endDate);
 
     /**
      * Count payments by status for dashboard metrics.
@@ -151,4 +183,11 @@ public interface PaymentRepository extends JpaRepository<Payment, UUID> {
      */
     @Query("SELECT p FROM Payment p WHERE p.status = 'FAILED' AND p.updatedAt > :since")
     List<Payment> findRecentFailures(@Param("since") OffsetDateTime since);
+
+    /**
+     * Pending approvals whose next escalation time has passed (stuck approval workflow).
+     */
+    @Query("SELECT p FROM Payment p WHERE p.status = :status AND p.escalationDueAt IS NOT NULL AND p.escalationDueAt <= :now")
+    List<Payment> findPendingApprovalEscalationsDue(@Param("status") PaymentStatus status,
+                                                    @Param("now") OffsetDateTime now);
 }

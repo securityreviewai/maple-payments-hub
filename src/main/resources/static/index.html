@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Maple Payments Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --nav-bg: rgba(15, 23, 42, 0.92);
+      --nav-border: rgba(148, 163, 184, 0.12);
+      --accent: #0d9488;
+      --accent-hover: #14b8a6;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Outfit', system-ui, sans-serif;
+      background: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+      min-height: 100vh;
+      color: var(--text);
+    }
+
+    .index-navbar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 1000;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 1rem 2rem;
+      background: var(--nav-bg);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--nav-border);
+    }
+
+    .index-navbar__brand {
+      font-size: 1.25rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .index-navbar__brand span {
+      color: var(--accent);
+    }
+
+    .index-navbar__links {
+      display: flex;
+      align-items: center;
+      gap: 2rem;
+      list-style: none;
+    }
+
+    .index-navbar__links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.9375rem;
+      font-weight: 500;
+      transition: color 0.2s ease;
+    }
+
+    .index-navbar__links a:hover {
+      color: var(--accent);
+    }
+
+    .index-navbar__links a.active {
+      color: var(--text);
+    }
+
+    .index-navbar__cta {
+      padding: 0.5rem 1rem;
+      background: var(--accent);
+      color: white;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.875rem;
+      border-radius: 6px;
+      transition: background 0.2s ease;
+    }
+
+    .index-navbar__cta:hover {
+      background: var(--accent-hover);
+    }
+
+    .hero {
+      padding: 8rem 2rem 4rem;
+      max-width: 48rem;
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .hero h1 {
+      font-size: 2.5rem;
+      font-weight: 700;
+      line-height: 1.2;
+      margin-bottom: 1rem;
+      letter-spacing: -0.03em;
+    }
+
+    .hero p {
+      font-size: 1.125rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    .hero__links {
+      margin-top: 2rem;
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .hero__links a {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.875rem;
+      padding: 0.625rem 1.25rem;
+      border: 1px solid var(--nav-border);
+      border-radius: 6px;
+      color: var(--text-muted);
+      text-decoration: none;
+      transition: all 0.2s ease;
+    }
+
+    .hero__links a:hover {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+  </style>
+</head>
+<body>
+  <nav class="index-navbar">
+    <a href="/" class="index-navbar__brand">
+      Maple<span>Payments</span> Hub
+    </a>
+    <ul class="index-navbar__links">
+      <li><a href="/" class="active">Home</a></li>
+      <li><a href="/static/dashboard.html">Dashboard</a></li>
+      <li><a href="/static/search.html">Payment Search</a></li>
+      <li><a href="/static/batches.html">SFTP Batches</a></li>
+      <li><a href="/api/docs">API Docs</a></li>
+      <li><a href="/actuator/health">Health</a></li>
+    </ul>
+    <a href="/api/docs" class="index-navbar__cta">Get Started</a>
+  </nav>
+
+  <main class="hero">
+    <h1>Corporate payment initiation, streamlined</h1>
+    <p>
+      A production-ready payment processing system with role-based access,
+      ISO20022 standards, comprehensive audit trails, and real-time event streaming.
+    </p>
+    <div class="hero__links">
+      <a href="/static/dashboard.html">Unified dashboard</a>
+      <a href="/api/docs">/api/docs</a>
+      <a href="/actuator/health">/actuator/health</a>
+      <a href="/public/ping">/public/ping</a>
+    </div>
+  </main>
+</body>
+</html>

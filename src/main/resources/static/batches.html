@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SFTP Batches | Maple Payments Hub</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --nav-bg: rgba(15, 23, 42, 0.92);
+      --nav-border: rgba(148, 163, 184, 0.12);
+      --accent: #0d9488;
+      --accent-hover: #14b8a6;
+      --text: #f8fafc;
+      --text-muted: #94a3b8;
+      --panel-bg: rgba(30, 41, 59, 0.6);
+      --input-bg: rgba(15, 23, 42, 0.8);
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: 'Outfit', system-ui, sans-serif;
+      background: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+      min-height: 100vh;
+      color: var(--text);
+    }
+    .nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 1000;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 1rem 2rem; background: var(--nav-bg); backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--nav-border);
+    }
+    .nav__brand { font-size: 1.25rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
+    .nav__brand span { color: var(--accent); }
+    .nav__links { display: flex; gap: 1.5rem; }
+    .nav__links a { color: var(--text-muted); text-decoration: none; font-size: 0.9375rem; transition: color 0.2s; }
+    .nav__links a:hover { color: var(--accent); }
+    .nav__links a.active { color: var(--text); }
+    main { padding: 6rem 2rem 4rem; max-width: 72rem; margin: 0 auto; }
+    h1 { font-size: 1.75rem; margin-bottom: 0.5rem; }
+    .subtitle { color: var(--text-muted); font-size: 0.9375rem; margin-bottom: 2rem; }
+    .auth-banner {
+      background: var(--panel-bg); border: 1px solid var(--nav-border); border-radius: 8px;
+      padding: 1rem 1.25rem; margin-bottom: 2rem; display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+    }
+    .auth-banner input {
+      flex: 1; min-width: 200px; padding: 0.5rem 0.75rem; background: var(--input-bg);
+      border: 1px solid var(--nav-border); border-radius: 6px; color: var(--text);
+      font-family: 'JetBrains Mono', monospace; font-size: 0.8125rem;
+    }
+    .btn {
+      padding: 0.5rem 1rem; border-radius: 6px; font-weight: 600; font-size: 0.875rem;
+      cursor: pointer; border: none; font-family: inherit;
+      background: var(--accent); color: white;
+    }
+    .btn:hover { background: var(--accent-hover); }
+    .btn--secondary { background: transparent; color: var(--text-muted); border: 1px solid var(--nav-border); }
+    .btn--secondary:hover { border-color: var(--accent); color: var(--accent); }
+    .panel {
+      background: var(--panel-bg); border: 1px solid var(--nav-border);
+      border-radius: 10px; padding: 1.5rem; overflow-x: auto;
+    }
+    table { width: 100%; border-collapse: collapse; font-size: 0.8125rem; }
+    th, td { padding: 0.65rem 0.75rem; text-align: left; border-bottom: 1px solid var(--nav-border); vertical-align: top; }
+    th { color: var(--text-muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em; font-size: 0.7rem; }
+    tr:hover td { background: rgba(13, 148, 136, 0.06); }
+    code { font-family: 'JetBrains Mono', monospace; font-size: 0.75rem; color: var(--accent); }
+    .msg { padding: 0.75rem 1rem; border-radius: 6px; margin-bottom: 1rem; font-size: 0.875rem; }
+    .msg--error { background: rgba(239, 68, 68, 0.15); color: #fca5a5; }
+    .pill { display: inline-block; padding: 0.15rem 0.5rem; border-radius: 4px; background: var(--input-bg); font-size: 0.75rem; }
+  </style>
+</head>
+<body>
+  <nav class="nav">
+    <a href="/" class="nav__brand">Maple<span>Payments</span> Hub</a>
+    <div class="nav__links">
+      <a href="/">Home</a>
+      <a href="/static/dashboard.html">Dashboard</a>
+      <a href="/static/search.html">Payment Search</a>
+      <a href="/static/batches.html" class="active">SFTP Batches</a>
+      <a href="/api/docs">API Docs</a>
+    </div>
+  </nav>
+
+  <main>
+    <h1>SFTP batch delivery</h1>
+    <p class="subtitle">Outbound ISO20022 batches, upload status, retries, and partner receipts (<code>/api/v1/payment-batches</code>).</p>
+
+    <div class="auth-banner">
+      <span style="color: var(--text-muted); font-size: 0.875rem;">Bearer token:</span>
+      <input type="password" id="tokenInput" placeholder="JWT (ROLE_CLEARING / read roles for list)">
+      <button class="btn btn--secondary" type="button" id="saveTokenBtn">Save</button>
+      <button class="btn" type="button" id="loadBtn">Load batches</button>
+    </div>
+    <div id="err" class="msg msg--error" style="display:none;"></div>
+
+    <div class="panel">
+      <table>
+        <thead>
+          <tr>
+            <th>Batch</th>
+            <th>SFTP status</th>
+            <th>Rows</th>
+            <th>Retries</th>
+            <th>Next retry</th>
+            <th>Receipt</th>
+            <th>Last error</th>
+          </tr>
+        </thead>
+        <tbody id="tbody"></tbody>
+      </table>
+    </div>
+  </main>
+
+  <script>
+    const tokenKey = 'maple_jwt';
+    const tbody = document.getElementById('tbody');
+    const err = document.getElementById('err');
+
+    function showError(m) {
+      err.textContent = m || '';
+      err.style.display = m ? 'block' : 'none';
+    }
+
+    document.getElementById('saveTokenBtn').addEventListener('click', () => {
+      const t = document.getElementById('tokenInput').value.trim();
+      if (t) localStorage.setItem(tokenKey, t);
+    });
+    document.getElementById('loadBtn').addEventListener('click', loadBatches);
+
+    const saved = localStorage.getItem(tokenKey);
+    if (saved) document.getElementById('tokenInput').value = saved;
+
+    function fmt(d) {
+      if (!d) return '—';
+      try { return new Date(d).toLocaleString(); } catch (e) { return d; }
+    }
+
+    async function loadBatches() {
+      showError('');
+      const token = document.getElementById('tokenInput').value.trim() || localStorage.getItem(tokenKey);
+      if (!token) {
+        showError('Set a bearer token to call the API.');
+        return;
+      }
+      localStorage.setItem(tokenKey, token);
+      const res = await fetch('/api/v1/payment-batches?size=50&sort=createdAt,desc', {
+        headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
+      });
+      if (!res.ok) {
+        showError('HTTP ' + res.status + ' — check token roles (read) and API base URL.');
+        tbody.innerHTML = '';
+        return;
+      }
+      const page = await res.json();
+      const rows = page.content || [];
+      tbody.innerHTML = rows.map(function (b) {
+        return '<tr>' +
+          '<td><code>' + (b.batchReference || '') + '</code><br><span class="pill">' + (b.iso20022Filename || '') + '</span></td>' +
+          '<td>' + (b.sftpDeliveryStatus || '') + '</td>' +
+          '<td>' + (b.paymentCount != null ? b.paymentCount : '') + '</td>' +
+          '<td>' + (b.deliveryRetryCount != null ? b.deliveryRetryCount : '0') + ' / ' + (b.maxDeliveryRetries != null ? b.maxDeliveryRetries : '') + '</td>' +
+          '<td>' + fmt(b.nextRetryAt) + '</td>' +
+          '<td>' + (b.receiptReceivedAt ? fmt(b.receiptReceivedAt) : '—') + '</td>' +
+          '<td style="max-width:14rem;word-break:break-word;">' + (b.sftpLastError || '—') + '</td>' +
+          '</tr>';
+      }).join('');
+    }
+  </script>
+</body>
+</html>
